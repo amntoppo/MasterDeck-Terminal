@@ -261,6 +261,20 @@ export function filterActivity(events: ActivityEvent[], f: ActivityFilter): Acti
 }
 
 /**
+ * The Timeline's list with a later read merged in: an event with the same id (a coalesced one,
+ * moved later) replaces the old, anything before `from` drops out, newest first, at most `max`.
+ */
+export function mergeActivity(list: ActivityEvent[], fresh: ActivityEvent[], from = 0, max = ACTIVITY_LIST_MAX): ActivityEvent[] {
+  if (!fresh.length) return list
+  const byId = new Map(list.map((e) => [e.id, e]))
+  for (const e of fresh) byId.set(e.id, e)
+  return [...byId.values()]
+    .filter((e) => e.at >= from)
+    .sort((x, y) => y.at - x.at || (x.id < y.id ? 1 : x.id > y.id ? -1 : 0))
+    .slice(0, max)
+}
+
+/**
  * Adds `e` to a newest-first list. The same type and subject within 15 minutes of its last event
  * replaces that one (keeping its id) so one session's turns or a PR's flapping make one row.
  */

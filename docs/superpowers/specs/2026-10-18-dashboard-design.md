@@ -135,7 +135,7 @@ interface AttentionList { items: AttentionItem[]; total: number; now: number; mo
 | A schedule's last run `failed` in the last 24 h, with no later run of it | soon | 42 | Schedule "*name*" failed |
 | A `watches` entry with `error`, or a `prWatches` row with `error` | soon | 40 | Monitor / PR watch "*name*" cannot read its source |
 | My PR approved, `ci` success or null, no unresolved threads, not draft | ready | 20 | *repo#n* is ready to merge |
-| `update.phase` downloaded or ready, with an `offer` | info | 15 | MasterDeck *version* is ready to install |
+| `update.phase` `ready`, with an `offer` | info | 15 | MasterDeck *version* is ready to install |
 
 - **"Mine"** means the author is `me`, or any login in `ghAccounts`.
 - **Dedupe** works by subject:
@@ -250,8 +250,9 @@ From main's stores, through one `activity.add(e)`:
 
 - **schedule-run**: a run's status becomes `done`, `failed`, `skipped` or `stopped`. The
   scheduler gains an `onRun(run)` hook beside `onChange`.
-- **meeting**: a meeting saved with its notes. The meetings store (`main/meetings/store.ts`) gains an `onSaved({id, title,
-  startedAt, durationMs})` hook at the point its record is first written complete.
+- **meeting**: a meeting whose recording ended. The meetings store (`main/meetings/store.ts`) gains
+  an `onEnded(meeting)` hook, called once when a stored meeting's `ended` is set; `meetingEvent`
+  skips an empty recording that failed.
 - **note-added**: a new note. `NotesStore` passes `created: true` on the change of a note that
   did not exist.
   - The event is "A note was added", or "A note was added to #42" for a ticket note, with
@@ -374,9 +375,9 @@ a collapsed "Details".
 | Remote | `remote.conn` connected (and the browsers connected) | connecting / error (its `message`) / off when enabled |
 | GitHub | every `ghAccounts` healthy, no `ghCache.pausedUntil`, no `boardError` / `teamPrsError` | the first problem, in words |
 | Claude | `sources.agents` ok | its error; `missingBinaries` |
-| Hooks and status line | `hooks` installed, `statuslineInstalled` | **Fix** (Settings → Hooks, mods & skills) |
+| Hooks and status line | `hooks` installed (the status line is optional: without it the row stays ok, "status line off") | a hook missing, with **Fix** (Settings → Hooks, mods & skills) |
 | Errors | `errors` empty | the first one, "and *n* more" |
-| Stray processes | none found | "vite :5174 from a finished session" with **Show** (it expands the list, each with its port and folder) |
+| Stray processes | none found | "vite :5174 in web, not started by a session" with **Show** (it expands the list, each with its port and folder) |
 | Worktrees | "Not checked", with **Check worktrees** | after a check: "*n* can be removed →" (Janitor) |
 | MasterDeck | the version, up to date | an update available or ready (**Restart to update**), an update error |
 
@@ -599,5 +600,3 @@ unchanged.
   reads as a push. It is accepted and named in the GUIDE.
 - **Session-finished coalescing** makes a busy session show one line per 15 minutes, not per
   turn. It is tunable.
-- **The meetings store's save point** (`main/meetings/store.ts`) is to be found in the plan. A meeting saved without notes
-  is not logged.

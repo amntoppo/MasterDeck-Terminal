@@ -108,10 +108,27 @@ export function fingerprintOf(s: { pr: Pick<TeamPr, 'ci' | 'reviewDecision' | 'u
   return s.update
 }
 
-/** Dismissals of subjects still present, the newest `DISMISSED_MAX`. */
-export function pruneDismissed(dismissed: Dismissal[], subjects: readonly string[]): Dismissal[] {
+/** Which sources of derived items have been read: a subject missing from one still loading is not gone. */
+export interface DismissLoaded {
+  /** `sched:list` answered (`run:` items). */
+  sched: boolean
+  /** The team's PRs were read (`pr:` items). */
+  prs: boolean
+  /** The update state is known (`update:` items; it never is on the web). */
+  update: boolean
+}
+
+const ALL_LOADED: DismissLoaded = { sched: true, prs: true, update: true }
+
+/**
+ * Dismissals of subjects still present, the newest `DISMISSED_MAX`. A dismissal whose source has
+ * not loaded yet is kept: `run:` until the schedules are read, `pr:` until the PRs are, `update:`
+ * until the update state is. Monitors (`watch:`) come with every state, so they are pruned always.
+ */
+export function pruneDismissed(dismissed: Dismissal[], subjects: readonly string[], loaded: DismissLoaded = ALL_LOADED): Dismissal[] {
   const here = new Set(subjects)
-  return dismissed.filter((d) => here.has(d.id)).slice(-DISMISSED_MAX)
+  const waiting = (id: string) => (id.startsWith('run:') && !loaded.sched) || (id.startsWith('pr:') && !loaded.prs) || (id.startsWith('update:') && !loaded.update)
+  return dismissed.filter((d) => here.has(d.id) || waiting(d.id)).slice(-DISMISSED_MAX)
 }
 
 /** owner/name#n from a PR link, else what the record has. */
@@ -798,10 +815,10 @@ export function healthView(input: HealthInput): HealthView {
 
   // Hooks and status line
   {
-    // MasterDeck installs no deck hooks on Windows: only the status line applies there.
+    // MasterDeck installs no deck hooks on Windows. The status line is optional (it can be removed
+    // in Settings), so its absence alone is no problem: the row only says so.
     const w = input.windows
     const missing = [
-      ...(input.statuslineInstalled ? [] : ['the status line']),
       ...(w || input.hooks.queue ? [] : ['the /queue hook']),
       ...(w || input.hooks.reviewGate ? [] : ['the self-review gate']),
       ...(w || input.hooks.masterGuard ? [] : ['the master reports guard']),
@@ -809,7 +826,7 @@ export function healthView(input: HealthInput): HealthView {
     rows.push(
       missing.length
         ? { id: 'hooks', status: 'warn', label: 'Hooks and status line', detail: `Not installed: ${missing.join(', ')}`, action: { type: 'settings', section: 'hooks', label: 'Fix' } }
-        : { id: 'hooks', status: 'ok', label: 'Hooks and status line', detail: 'Installed' },
+        : { id: 'hooks', status: 'ok', label: 'Hooks and status line', detail: input.statuslineInstalled ? 'Installed' : w ? 'Status line off' : 'Installed · status line off' },
     )
   }
 
@@ -832,7 +849,10 @@ export function healthView(input: HealthInput): HealthView {
       const port = s.ports[0] ? ` :${s.ports[0].port}` : ''
       const more = p.strays.length > 1 ? `, and ${p.strays.length - 1} more` : ''
       const partial = p.error ? ' (the read was incomplete)' : ''
-      rows.push({ id: 'strays', status: 'warn', label, detail: `${strayName(s.command)}${port} from a finished session${more}${partial}`, action: { type: 'show-strays', label: 'Show' }, strays: p.strays })
+      // A stray sits in a session's folder but below no running session: a finished session left
+      // it, or someone started it by hand there.
+      const where = s.folderOf ? ` in ${s.folderOf.split(/[\\/]/).filter(Boolean).pop() ?? s.folderOf}` : ''
+      rows.push({ id: 'strays', status: 'warn', label, detail: `${strayName(s.command)}${port}${where}, not started by a session${more}${partial}`, action: { type: 'show-strays', label: 'Show' }, strays: p.strays })
     }
   }
 

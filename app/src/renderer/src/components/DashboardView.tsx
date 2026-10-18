@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ActivityEvent } from '@shared/activityLog'
+import { ACTIVITY_COALESCE_MS, mergeActivity, type ActivityEvent } from '@shared/activityLog'
 import { attentionItems, deliveryView, healthView, nowView, pruneDismissed, usageView, type AttentionItem, type Dismissal } from '@shared/dashboard'
 import type { CardId } from '@shared/dashboardLayout'
 import { formatRefreshed } from '@shared/format'
@@ -238,30 +238,76 @@ export function DashboardView(props: DashboardProps) {
   // To the end of today, so an event recorded within the current minute is in.
   const until = filters.range === 'yesterday' ? today : midnight(now, 1)
   const [events, setEvents] = useState<{ key: string; list: ActivityEvent[] } | null>(null)
-  const [changed, setChanged] = useState(0)
-  // Only a range that is still open can gain events: Yesterday is not read again.
-  const untilRef = useRef(until)
-  untilRef.current = until
-  useEffect(() => {
-    if (!can('onActivityChanged')) return
-    return deck().onActivityChanged(() => {
-      if (untilRef.current > Date.now()) setChanged((n) => n + 1)
-    })
-  }, [])
+  const [tlError, setTlError] = useState<{ key: string; message: string } | null>(null)
+  const [fullRead, setFullRead] = useState(0)
   const rangeKey = `${from}-${until}`
+  const range = useRef({ from, until, key: rangeKey })
+  range.current = { from, until, key: rangeKey }
+  const eventsNow = useRef(events)
+  eventsNow.current = events
+  // The whole range: on mount, when the range changes, and on Retry.
   useEffect(() => {
     if (!can('activityList')) return setEvents({ key: rangeKey, list: [] })
     let alive = true
+    setTlError(null)
     void deck()
       .activityList(from, until)
       .then((list) => alive && setEvents({ key: rangeKey, list }))
-      .catch(() => alive && setEvents({ key: rangeKey, list: [] }))
+      .catch((e) => alive && setTlError({ key: rangeKey, message: e instanceof Error ? e.message : String(e) }))
     return () => {
       alive = false
     }
-  }, [rangeKey, changed]) // eslint-disable-line react-hooks/exhaustive-deps
-  // A new range shows the skeleton until its answer; a refresh of the same range keeps the rows.
-  const shownEvents = events && events.key === rangeKey ? events.list : null
+  }, [rangeKey, fullRead]) // eslint-disable-line react-hooks/exhaustive-deps
+  // On activity:changed, only what is new: from 15 minutes before the newest event shown (a
+  // coalesced event moves later and keeps its id), merged in by id. Only a range still open can
+  // gain events (not Yesterday). The web reads at most every 15 s; the window as they come.
+  useEffect(() => {
+    if (!can('onActivityChanged') || !can('activityList')) return
+    const gap = isWeb() ? 15_000 : 0
+    let last = 0
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let busy = false
+    let again = false
+    let alive = true
+    const read = () => {
+      timer = null
+      const r = range.current
+      const cur = eventsNow.current
+      if (!cur || cur.key !== r.key || r.until <= Date.now()) return
+      if (busy) {
+        again = true
+        return
+      }
+      busy = true
+      last = Date.now()
+      const since = Math.max(r.from, (cur.list[0]?.at ?? r.from) - ACTIVITY_COALESCE_MS)
+      void deck()
+        .activityList(since, r.until)
+        .then((fresh) => alive && setEvents((e) => (e && e.key === r.key ? { key: r.key, list: mergeActivity(e.list, fresh, r.from) } : e)))
+        .catch(() => {})
+        .finally(() => {
+          busy = false
+          if (again && alive) {
+            again = false
+            schedule()
+          }
+        })
+    }
+    const schedule = () => {
+      if (timer) return
+      timer = setTimeout(read, Math.max(0, last + gap - Date.now()))
+    }
+    const off = deck().onActivityChanged(schedule)
+    return () => {
+      alive = false
+      off()
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+  // A new range shows the skeleton until its answer; a read that changed nothing keeps the list.
+  const shownEvents = useStable(events && events.key === rangeKey ? events.list : null)
+  const timelineError = tlError && tlError.key === rangeKey && !(events && events.key === rangeKey) ? tlError.message : null
+  const retryTimeline = useCallback(() => setFullRead((n) => n + 1), [])
 
   // ---- Needs attention
 
@@ -293,6 +339,9 @@ export function DashboardView(props: DashboardProps) {
   const subjects = attention.subjects
   const subjectsRef = useRef(subjects)
   subjectsRef.current = subjects
+  // Which sources have answered: a dismissal of one still loading is kept.
+  const loadedRef = useRef({ sched: false, prs: false, update: false })
+  loadedRef.current = { sched: sched !== null, prs: state.teamPrsAt !== null, update: update !== null }
   const dismissedHere = useMemo(() => {
     const here = new Set(subjects)
     return dismissed.filter((d) => here.has(d.id)).length
@@ -301,7 +350,7 @@ export function DashboardView(props: DashboardProps) {
     (item: AttentionItem) => {
       setDismissed((cur) => {
         // Pruned of subjects no longer present, when written (a list still loading is not "gone").
-        const next = pruneDismissed([...cur.filter((d) => d.id !== item.id), { id: item.id, fingerprint: item.fingerprint }], subjectsRef.current)
+        const next = pruneDismissed([...cur.filter((d) => d.id !== item.id), { id: item.id, fingerprint: item.fingerprint }], subjectsRef.current, loadedRef.current)
         save(DISMISSED_KEY, next)
         return next
       })
@@ -407,7 +456,7 @@ export function DashboardView(props: DashboardProps) {
       case 'now':
         return <NowCard key={id} view={nowV} now={now} loading={agentsLoading} nav={nav} procsBusy={procsBusy} onRefresh={readProcs} portLinks={portLinks} windows={windows} compact={compact} />
       case 'timeline':
-        return <TimelineCard key={id} events={shownEvents} filters={filters} onFilters={setFilters} now={now} nav={nav} from={from} recordingSince={since} compact={compact} />
+        return <TimelineCard key={id} events={shownEvents} filters={filters} onFilters={setFilters} now={now} nav={nav} from={from} recordingSince={since} compact={compact} error={timelineError} onRetry={retryTimeline} />
       case 'delivery':
         return <DeliveryCard key={id} view={delivery} loading={!state.board && state.boardLoading} prsRead={state.teamPrsAt !== null || !!state.teamPrsError} nav={nav} compact={compact} />
       case 'usage':

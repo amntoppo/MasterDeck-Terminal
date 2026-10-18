@@ -12,6 +12,7 @@ import {
   filterActivity,
   forRemote,
   inboxEvent,
+  mergeActivity,
   meetingEvent,
   noteEvent,
   releaseEvents,
@@ -248,6 +249,22 @@ describe('filterActivity', () => {
     expect(TYPE_TAG['commit-pushed']).toBe('GIT')
     expect(TYPE_GROUP['meeting']).toBe(TYPE_GROUP['note-added'])
     expect(TYPE_GROUP['release']).toBeNull()
+  })
+})
+
+describe('mergeActivity', () => {
+  it('replaces same-id events, drops what is before the range, newest first, capped', () => {
+    const a = ev(NOW - 20 * 60_000, { id: 'a' })
+    const b = ev(NOW - 10 * 60_000, { id: 'b', title: 'old' })
+    const old = ev(NOW - 5 * 86_400_000, { id: 'gone' })
+    const b2 = { ...b, at: NOW - 60_000, title: 'new' }
+    const c = ev(NOW, { id: 'c' })
+    expect(mergeActivity([b, a, old], [b2, c], NOW - 86_400_000)).toEqual([c, b2, a])
+    expect(mergeActivity([c, b, a], [b2, c], 0, 2)).toEqual([c, b2])
+  })
+  it('keeps the same list when nothing came', () => {
+    const l = [ev(NOW, { id: 'x' })]
+    expect(mergeActivity(l, [])).toBe(l)
   })
 })
 

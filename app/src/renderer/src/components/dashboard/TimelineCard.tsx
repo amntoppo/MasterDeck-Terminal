@@ -59,6 +59,8 @@ export const TimelineCard = memo(function TimelineCard({
   from,
   recordingSince,
   compact,
+  error,
+  onRetry,
 }: {
   /** The range's events, newest first; null while read. */
   events: ActivityEvent[] | null
@@ -72,6 +74,9 @@ export const TimelineCard = memo(function TimelineCard({
   recordingSince: number | null
   /** The phone or a narrow window: the kinds and the selects move into a sheet. */
   compact?: boolean
+  /** The range could not be read (and nothing of it is shown). */
+  error?: string | null
+  onRetry?: () => void
 }) {
   const [shown, setShown] = useState(PAGE)
   const set = (p: Partial<TimelineFilters>) => {
@@ -116,7 +121,7 @@ export const TimelineCard = memo(function TimelineCard({
       title="Timeline"
       count={events ? `${full ? `${list.length}+` : list.length} ${range.words}` : null}
       countTip={`Events recorded ${range.words} on this Mac${filtered ? ', of the kinds picked' : ''}`}
-      loading={events === null}
+      loading={events === null && !error}
     >
       {!compact && (
         <div className="dash-tfil" role="group" aria-label="Kinds">
@@ -168,7 +173,14 @@ export const TimelineCard = memo(function TimelineCard({
           </>
         )}
       </div>
-      {empty ? (
+      {error ? (
+        <div className="dash-empty" title={error}>
+          Could not read the timeline ·{' '}
+          <button className="dash-more" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      ) : empty ? (
         <div className="dash-empty">{empty}</div>
       ) : (
         <div className="dash-feed">

@@ -293,6 +293,21 @@ describe('pruneDismissed', () => {
     expect(kept).toHaveLength(200)
     expect(kept[0].id).toBe('x50')
   })
+
+  it('keeps the dismissals of a source still loading', () => {
+    const d = [
+      { id: 'run:1', fingerprint: '1' },
+      { id: 'pr:https://github.com/acme/web/pull/1:ci', fingerprint: 'x' },
+      { id: 'watch:m1', fingerprint: 'e|1' },
+      { id: 'update:0.9.1', fingerprint: '0.9.1' },
+    ]
+    // Nothing loaded: only the monitor, which comes with every state, is pruned.
+    expect(pruneDismissed(d, [], { sched: false, prs: false, update: false }).map((x) => x.id)).toEqual(['run:1', 'pr:https://github.com/acme/web/pull/1:ci', 'update:0.9.1'])
+    // Schedules read, PRs not: the run goes, the PR stays.
+    expect(pruneDismissed(d, [], { sched: true, prs: false, update: true }).map((x) => x.id)).toEqual(['pr:https://github.com/acme/web/pull/1:ci'])
+    // Everything read: only what is present stays.
+    expect(pruneDismissed(d, ['watch:m1'], { sched: true, prs: true, update: true }).map((x) => x.id)).toEqual(['watch:m1'])
+  })
 })
 
 function nowIn(extra: Partial<NowInput> = {}): NowInput {
@@ -586,13 +601,18 @@ describe('healthView', () => {
 
   it('reads the hooks and the status line, with Fix', () => {
     const r = row(healthIn({ statuslineInstalled: false, hooks: { queue: true, foreignQueue: false, reviewGate: false, masterGuard: true } }), 'hooks')
-    expect(r).toMatchObject({ status: 'warn', detail: 'Not installed: the status line, the self-review gate', action: { type: 'settings', section: 'hooks', label: 'Fix' } })
+    expect(r).toMatchObject({ status: 'warn', detail: 'Not installed: the self-review gate', action: { type: 'settings', section: 'hooks', label: 'Fix' } })
+  })
+
+  it('treats the status line as optional', () => {
+    expect(row(healthIn({ statuslineInstalled: false }), 'hooks')).toMatchObject({ status: 'ok', detail: 'Installed · status line off' })
+    expect(row(healthIn({}), 'hooks')).toMatchObject({ status: 'ok', detail: 'Installed' })
   })
 
   it('checks only the status line on Windows', () => {
     const none = { queue: false, foreignQueue: false, reviewGate: false, masterGuard: false }
     expect(row(healthIn({ windows: true, hooks: none }), 'hooks')).toMatchObject({ status: 'ok' })
-    expect(row(healthIn({ windows: true, hooks: none, statuslineInstalled: false }), 'hooks')).toMatchObject({ status: 'warn', detail: 'Not installed: the status line' })
+    expect(row(healthIn({ windows: true, hooks: none, statuslineInstalled: false }), 'hooks')).toMatchObject({ status: 'ok', detail: 'Status line off' })
   })
 
   it('reads the errors', () => {
@@ -605,7 +625,10 @@ describe('healthView', () => {
     expect(row(healthIn({ windows: true }), 'strays')).toMatchObject({ status: 'unknown', detail: 'Not available on Windows' })
     const strays = [{ pid: 9, command: '/usr/local/bin/vite --port 5174', cwd: '/w', ports: [{ host: '*', port: 5174 }], startedAt: 0, folderOf: '/w' }, { pid: 10, command: 'python -m http.server', cwd: '/w', ports: [{ host: '*', port: 8000 }], startedAt: 0, folderOf: '/w' }]
     const r = row(healthIn({ procs: { at: NOW, sessions: {}, strays } }), 'strays')
-    expect(r).toMatchObject({ status: 'warn', detail: 'vite :5174 from a finished session, and 1 more', action: { type: 'show-strays', label: 'Show' } })
+    expect(r).toMatchObject({ status: 'warn', detail: 'vite :5174 in w, not started by a session, and 1 more', action: { type: 'show-strays', label: 'Show' } })
+    const solo = [{ ...strays[1], folderOf: '/home/u/acme/web' }]
+    expect(row(healthIn({ procs: { at: NOW, sessions: {}, strays: solo } }), 'strays')).toMatchObject({ detail: 'python :8000 in web, not started by a session' })
+    expect(row(healthIn({ procs: { at: NOW, sessions: {}, strays: [{ ...strays[1], folderOf: null }] } }), 'strays')).toMatchObject({ detail: 'python :8000, not started by a session' })
     expect(r!.strays).toHaveLength(2)
     expect(row(healthIn({ procs: { at: NOW, sessions: {}, strays: [], error: 'lsof failed' } }), 'strays')).toMatchObject({ status: 'warn', detail: 'Could not be read: lsof failed' })
   })
