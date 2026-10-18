@@ -942,9 +942,8 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   after this PR is its first run (and, if no tag came before it, the first real upload to R2). Look
   at: the commit status on the merge commit, the tag's release commit, the GitHub release's text,
   Settings → Updates on an installed 0.9.x (installs before #122's updater need one manual update).
-- **P2 · Branch protection.** CI runs on pull requests only, so a push straight to `main` (or a
-  PR merged with red CI) is checked only by the release build's tests. Require CI on `main`
-  (repository → Settings → Branches) so every merge has passed it.
+- **P2 · Branch protection.** Moved to "CI/CD (#178)" below: the command is in OPERATIONS
+  § Protecting main, for the owner to run.
 - **P3 · The non-app file list is fixed** (`isAppFile` in `app/scripts/auto-release.mjs`): a new
   docs or tooling folder releases once until it is added there (and to `IGNORED_PATHS` /
   `paths-ignore`).
@@ -1094,8 +1093,36 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   shows on the card only, and the user tells Claude. An answer file the session could read would let
   it react by itself.
 
+## CI/CD (#178): open points (2026-10-18)
+
+- **P1 · Branch protection on `main`** (the owner, once, after the merge): OPERATIONS § Protecting
+  main. Until then a PR can still be merged with a red **CI**.
+- **P1 · The first real runs.** `build.yml` through a release, the native-helpers cache (the first
+  release builds whisper-cli and md-mute once and saves them), `release-smoke.mjs` against a real
+  publish, the announce comment and a web deploy have not run on GitHub yet. Look at the first app
+  merge's Auto release run.
+- **P2 · Optional secrets** (each part says in a notice while it is missing): `BOARD_TOKEN` + the
+  variable `BOARD_PROJECT` (`amntoppo/1`) for tickets to Done, `BACKEND_DEPLOY_KEY` for the drift
+  test (#5), `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` for the web deploy.
+- **P2 · The backend's side** (#4, #137): deploy `masterdeck-backend` (Worker + D1 migrations) on
+  merge to `master` once its Cloudflare token works, and its own drift check (#5).
+- **P3 · A Needs you item for a failed release.** CI can only comment and set a status today: the
+  backend has no route for a CI job to raise an inbox item on the owner's Mac.
+- **P3 · `OTA_MAIN_CHANNEL` is `beta`** in the repository's variables (2026-10-18), so merges go to
+  the beta channel; the default (unset) is stable at 100 %. Remove it when merges should reach
+  everyone.
+- **P3 · Lists to keep in step.** `ci-changes.mjs` (docs-only and packaging files) and
+  `web-deploy.yml`'s `paths` are fixed lists: a new folder of either kind needs adding there.
+
 ## Recently done
 
+- **CI/CD for a fast cycle (#178)**: PR CI is checks only (ubuntu, parallel, one required job
+  **CI**, older runs cancelled, docs-only PRs skip), installers built once per release by
+  `build.yml` and on PRs only for packaging changes (`package.yml`, the `build` label), whisper-cli
+  and md-mute cached, release tests before the builds, a smoke check after every publish
+  (`release-smoke.mjs`), the release link on the PRs and tickets to Done (announce), the web app
+  deployed on merge (`web-deploy.yml`), the drift test wired for CI (`BACKEND_DEPLOY_KEY`). Branch
+  `worktree-178-ci-cd-fast-cycle`.
 - **Watch any PR (#182)**: an eye on every open PR in the Pull requests view and its popup (filled:
   watched, with where events go), and **Watched PRs** with an **Add** field in the Review with
   Claude card. A manual watch goes to the session that owns the PR, else to the tab's review
