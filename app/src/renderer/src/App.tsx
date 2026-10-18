@@ -357,10 +357,12 @@ export function App() {
   useEffect(() => {
     if (!screenOk(view)) setView("tasks");
   }, [view]);
+  useEffect(() => save("view", view), [view]);
+  // Only once the start view is applied: on the Mac, Open on = Dashboard replaces a saved Board
+  // with the first state, and telling main the Board is open before that starts a wasted read.
   useEffect(() => {
-    save("view", view);
-    deck().setBoardOpen(view === "board");
-  }, [view]);
+    if (startApplied) deck().setBoardOpen(view === "board");
+  }, [view, startApplied]);
   // Phone: the Notes sheet covers the screen, so a screen chosen from anywhere (the palette, a result, a tab) must close
   // it. Closing unmounts the panel, which sends what is typed. The desktop panel stays open across views.
   const screenKey = `${view}/${phoneScreen}`;
@@ -1405,7 +1407,44 @@ export function App() {
           }}
         />
       )}
-      {view === "dashboard" && <DashboardView state={state} />}
+      {view === "dashboard" && (
+        <DashboardView
+          state={state}
+          update={update}
+          onOpenSession={openSession}
+          onIssue={onIssue}
+          onTicket={(t) => {
+            const issue =
+              state.issues.find((i) => sameTicket(i, t)) ??
+              (() => {
+                const card = state.board?.cards.find((c) => sameTicket(c, t));
+                return card ? issueOf(card) : null;
+              })();
+            if (issue) onIssue(issue);
+            else setView("board");
+          }}
+          onStartWith={startWithInstructions}
+          onOpenMeeting={(id) => openMeeting(id, null)}
+          onPr={(url, title) => {
+            const s = state.sessions.find((x) =>
+              (state.sessionPrs[x.sessionId] ?? []).includes(url),
+            );
+            openPr(url, s ? sessionTicket(s) : null, title || (state.prLive[url]?.title ?? ""));
+          }}
+          onView={(v) => setView(v as View)}
+          onSettings={(section) => {
+            setSettingsAt({ section: section as SettingsSection, at: Date.now() });
+            setView("settings");
+          }}
+          onNeedsYou={() => {
+            setView("terminals");
+            if (phone) setPhoneScreen("list");
+            // After the Terminals screen is drawn, where the Needs-you list lives.
+            setTimeout(() => needsYouRef.current?.scrollIntoView({ behavior: "smooth" }), 0);
+          }}
+          onNote={(id) => setNotesAt({ id })}
+        />
+      )}
       {view === "costs" && (
         <CostsView state={state} onOpenSession={openSession} />
       )}
