@@ -26,7 +26,7 @@ const CLOSED = new Set(['done', 'rejected'])
 
 /** A finished proposal keeps what the web shows of it (summary, note), not the prompt master sent. */
 function slim(p: Proposal): Proposal {
-  if (!CLOSED.has(p.status)) return p
+  if (!p || !CLOSED.has(p.status)) return p
   const spawn = p.target?.spawn
   return { ...p, message: '', target: spawn?.prompt ? { ...p.target, spawn: { ...spawn, prompt: undefined } } : p.target }
 }

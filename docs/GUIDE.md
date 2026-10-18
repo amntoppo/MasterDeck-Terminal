@@ -1607,14 +1607,16 @@ encrypted (the MasterDeck service only relays sealed messages it can't read). Ne
 - **Terminal sizes:** while the Mac shows a terminal, its size wins; the browser's size applies
   only to terminals the Mac isn't showing.
 - **While it loads:** the page says what it is doing (Connecting…, Waiting for your Mac…, Loading
-  sessions…). If a step takes over 15 seconds, or the Mac says it can't send, it says why (the
-  server can't be reached, your Mac doesn't answer, no sessions arrived, too much to send) with
-  **Retry**. A Mac whose MasterDeck speaks another version gets "Update MasterDeck on your Mac"
+  sessions…). If the wait passes 15 seconds (reconnects don't restart it), or the Mac says it
+  can't send, it says why (the server can't be reached, your Mac doesn't answer, no sessions
+  arrived, too much to send) with **Retry**. A Mac whose MasterDeck speaks another version gets "Update MasterDeck on your Mac"
   (or "Reload this page" when the Mac is newer), with the versions.
 - **Very long lists:** when the Mac's lists are too large to send whole, the web gets a shorter
   copy (finished master proposals without their prompts first; then, only if needed, closed PRs,
   old Needs-you items and past sessions). The PRs view says "Open PRs only on the web" then.
-- **Mac offline:** the page says "Your Mac is offline — last seen …" and pauses until it is back.
+- **Mac offline:** the page shows "Your Mac is offline" with when it was last seen, and **Retry**,
+  until the Mac is back. If the Mac's latest changes ever get too large to send while the page is
+  open, a line at the top says what you see may be out of date.
   One tab per browser: opening another shows "MasterDeck is open in another tab · Use here".
 - **Settings → Remote → Browsers** lists approved browsers (and which are connected); **Revoke**
   cuts one off at once (it has to be approved again). Signing the Mac out, or into another account,

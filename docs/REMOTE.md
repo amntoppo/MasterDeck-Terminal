@@ -266,10 +266,16 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   `shared/webLoading.ts`): the app is shown only once the first state arrived on the channel.
   Until then: Connecting… (socket) → Waiting for your Mac… (handshake) → Loading sessions… (hello
   in, no state); "Your Mac is offline" (with last seen) as soon as the hub says so; the Mac's
-  `notice` at once; any stage that lasts `WEB_LOAD_TIMEOUT_MS` (15 s) turns into its reason
-  (can't reach the server, the Mac doesn't answer, no sessions arrived, with the Mac's version from
-  the hub's `desktop.appVersion`) and **Retry** (a fresh run: session, approval, socket). A reconnect
-  in the same phase keeps the clock running.
+  `notice` at once ("Too much to send": that Mac already fits its state, so the text says to use
+  the Mac, not to update it). The wait has one clock (`advance`): it moves only when the wait
+  reaches a further phase (socket → handshake → state), never when a reconnect drops back (the
+  handshake's own 15 s timer closes and redials the socket), and restarts only when a shown app
+  loses its channel. After `WEB_LOAD_TIMEOUT_MS` (15 s) the screen gives the reason for the
+  furthest phase reached (can't reach the server, the Mac doesn't answer, no sessions arrived, with
+  the Mac's version from the hub's `desktop.appVersion`) and **Retry** (a fresh run: session,
+  approval, socket). A `notice` while the app shows puts a banner up until the next state. The
+  bridge dedupes state events on the raw JSON (`lastRaw`), so an unchanged state is not fitted
+  again; `lastState` is the fitted JSON (resync, patch base).
 
 - State: queued per connection at most every `stateMs` (1500 ms default), deduped by JSON.
   Old web (no `patches`) → full state each time. Patch subscriber → numbered full first, then

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { browserHandshake, generateStatic, type Channel } from '@shared/e2e'
 import { deviceFrom } from '@shared/deviceInfo'
 import { PROTOCOL_VERSION, type DesktopStatus, type ServerToBrowser } from '@shared/remote'
-import { loadView, updateText, type LoadPhase } from '@shared/webLoading'
+import { advance, loadView, startWait, updateText, type LoadPhase } from '@shared/webLoading'
 import type { MacToWeb } from '@shared/bridgeWire'
 import { App } from '@renderer/App'
 import { afterClose, approve, browserName, type Api, type Outcome, type Res } from './approval'
@@ -42,16 +42,17 @@ interface Conn {
   desktop: DesktopStatus | null
   /** Bumped per channel: App remounts on a fresh deck, so nothing stale shows. */
   gen: number
-  /** How far this connection got, and since when: the loading screen names a reason when a phase lasts (#168). */
+  /** Where this connection is; `reached` / `since` are the wait's clock (`advance`): a reason after 15 s (#168). */
   phase: LoadPhase
+  reached: LoadPhase
   since: number
   /** The first state arrived on this channel: only then the app shows (never a bare "Loading sessions…"). */
   stateSeen: boolean
-  /** The Mac said its state is too large to send. */
+  /** The Mac said its state is too large to send (before the app: the loading screen; after: a banner). */
   tooLarge: { bytes: number } | null
 }
 
-const freshConn = (): Conn => ({ up: false, desktop: null, gen: 0, phase: 'socket', since: Date.now(), stateSeen: false, tooLarge: null })
+const freshConn = (): Conn => ({ up: false, desktop: null, gen: 0, phase: 'socket', ...startWait(Date.now()), stateSeen: false, tooLarge: null })
 
 /** Everything before the app renders (spec §5): sign in, this browser's keys, approval, the encrypted channel. */
 export function Gate() {
@@ -153,7 +154,12 @@ export function Gate() {
 
   if (screen.s === 'app') {
     // The Loading card names the rest (Mac offline, no answer, …); this only says it was connected before.
-    const banner = !conn.up && conn.desktop ? 'Reconnecting…' : null
+    const banner =
+      !conn.up && conn.desktop
+        ? 'Reconnecting…'
+        : ready && conn.tooLarge
+          ? "Your Mac's latest changes are too large to send to the web; what you see may be out of date."
+          : null
     return (
       <>
         {banner && <div className="web-banner">{banner}</div>}
@@ -233,7 +239,7 @@ export function Gate() {
 
 /** Between approval and the first state: what is happening, and after a while why it is not (#168). */
 function Loading({ conn, now, retry }: { conn: Conn; now: number; retry: () => void }) {
-  const v = loadView({ up: conn.up, desktop: conn.desktop, phase: conn.phase, since: conn.since, now, tooLarge: conn.tooLarge })
+  const v = loadView({ up: conn.up, desktop: conn.desktop, phase: conn.phase, reached: conn.reached, since: conn.since, now, tooLarge: conn.tooLarge })
   return (
     <Card title={v.title}>
       <p data-stage={v.stage}>{v.text}</p>
@@ -274,9 +280,12 @@ function connect(rec: KeyRec, h: Hooks): () => void {
   let retryTimer: ReturnType<typeof setTimeout> | undefined
   let ws: WebSocket | null = null
 
-  /** A new phase restarts the loading clock; the same one (a reconnect) keeps it running. */
+  /** Where the connection is now; the wait's clock moves only on progress (`advance`). */
   const phase = (p: LoadPhase, more?: Partial<Conn>) =>
-    h.conn((c) => (c.phase === p && !more ? c : { ...c, ...more, phase: p, since: c.phase === p ? c.since : Date.now() }))
+    h.conn((c) => {
+      const k = advance(c, p, Date.now())
+      return c.phase === p && k === c && !more ? c : { ...c, ...more, phase: p, reached: k.reached, since: k.since }
+    })
 
   const open = () => {
     phase('socket')
@@ -307,7 +316,8 @@ function connect(rec: KeyRec, h: Hooks): () => void {
       hello = false
       offState?.()
       offState = undefined
-      h.conn((c) => (c.stateSeen || c.tooLarge ? { ...c, stateSeen: false, tooLarge: null } : c))
+      // The app was showing: a new wait begins, with its own clock.
+      h.conn((c) => (c.stateSeen ? { ...c, stateSeen: false, tooLarge: null, ...startWait(Date.now()) } : c.tooLarge ? { ...c, tooLarge: null } : c))
       onClose?.()
       onFrame = onClose = undefined
     }
@@ -358,12 +368,12 @@ function connect(rec: KeyRec, h: Hooks): () => void {
           reached = true
           const io = { send: sendFrame, onFrame: (cb: (d: string) => void) => void (onFrame = cb), onClose: (cb: () => void) => void (onClose = cb) }
           window.deck = createRemoteDeck(io, ch, first, (n) => {
-            if (n.why === 'tooLarge') h.conn((c) => (c.stateSeen ? c : { ...c, tooLarge: { bytes: n.bytes } }))
+            if (n.why === 'tooLarge') h.conn((c) => ({ ...c, tooLarge: { bytes: n.bytes } }))
           })
           backoff = 1000
           quick = true
           phase('state', { gen: Date.now(), stateSeen: false, tooLarge: null })
-          offState = window.deck.onState(() => h.conn((c) => (c.stateSeen ? c : { ...c, stateSeen: true, tooLarge: null })))
+          offState = window.deck.onState(() => h.conn((c) => (c.stateSeen && !c.tooLarge ? c : { ...c, stateSeen: true, tooLarge: null })))
           if (document.hidden) void visible()
           // Tell the Mac what this is ("Chrome on macOS") for its remote indicator; an older Mac ignores the message.
           const device = deviceFrom(navigator.userAgent, (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform)

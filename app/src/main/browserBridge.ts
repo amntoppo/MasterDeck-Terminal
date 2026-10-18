@@ -55,8 +55,12 @@ const PTY_CHUNK = 128 * 1024
 /** Base64url length of a sealed message whose JSON is this many UTF-8 bytes (+16 GCM tag). */
 const sealedLen = (bytes: number) => Math.ceil(((bytes + 16) * 4) / 3)
 const tooBig = (m: unknown) => sealedLen(Buffer.byteLength(JSON.stringify(m) ?? '')) > MAX_FRAME
-/** The state as the web gets it: fitted into one frame (`fitWebState`); null (still loading) as is. */
-const webState = (s: unknown) => (s && typeof s === 'object' ? fitWebState(s as AppState).state : s)
+/** The state as the web gets it, and its JSON: fitted into one frame (`fitWebState`); null (still loading) as is. */
+const webState = (s: unknown): { state: unknown; json: string } => {
+  if (!s || typeof s !== 'object') return { state: s, json: JSON.stringify(s) }
+  const f = fitWebState(s as AppState)
+  return { state: f.state, json: f.json }
+}
 const later = (ms: number, f: () => void) => setTimeout(f, Math.max(0, ms)).unref?.()
 const isHs1 = (d: string) => {
   try {
@@ -94,6 +98,8 @@ interface Conn {
   replaced: boolean
   calls: number[]
   lastState?: string
+  /** The JSON of the last state queued, before fitting: `event()` dedupes on it (lastState is the fitted one). */
+  lastRaw?: string
   /** Patch-capable state subscriber: `sent` is our own parsed copy of lastState (the evp base), `n` its number. */
   patches: boolean
   sent?: unknown
@@ -151,7 +157,7 @@ export class BrowserBridge {
       if (ch === CH.state) {
         stateJson ??= JSON.stringify(args[0])
         // A pending timer always takes the latest (A sent, B, A → nothing stale goes out); it dedupes when it fires.
-        if (c.stateTimer || stateJson !== c.lastState) this.queueState(c, args[0])
+        if (c.stateTimer || stateJson !== c.lastRaw) this.queueState(c, args[0])
       } else if (ev === CH.ptyData) {
         if (!c.visible) continue
         const buf = c.ptyBuf.get(arg!)
@@ -416,7 +422,7 @@ export class BrowserBridge {
     args = ARG_FIX[m.m as keyof typeof ARG_FIX]?.(args) ?? args
     try {
       let v = await this.d.call(access.ch, args)
-      if (access.ch === CH.getState) v = webState(v)
+      if (access.ch === CH.getState) v = webState(v).state
       if (access.mode === 'invoke') await this.ret(c, m.id, true, v)
     } catch (e) {
       if (access.mode === 'invoke') await this.ret(c, m.id, false, e instanceof Error ? e.message : String(e))
@@ -442,9 +448,11 @@ export class BrowserBridge {
     }
     c.subs.add(key)
     if (m.ev === CH.state) {
-      const s = webState(await this.d.call(CH.getState, []))
+      const raw = await this.d.call(CH.getState, [])
       if (this.conns.get(c.b) !== c || c.state !== 'open' || !c.subs.has(key)) return
-      await this.sendState(c, JSON.stringify(s), true, s)
+      const w = webState(raw)
+      c.lastRaw = JSON.stringify(raw)
+      await this.sendState(c, w.json, true, w.state)
     }
   }
 
@@ -455,10 +463,12 @@ export class BrowserBridge {
     c.stateTimer = setTimeout(() => {
       c.stateTimer = undefined
       if (c.state !== 'open' || !c.subs.has(CH.state)) return
-      const s = webState(c.stateNext)
-      const json = JSON.stringify(s)
-      if (json === c.lastState) return
-      void this.sendState(c, json, false, s)
+      const raw = JSON.stringify(c.stateNext)
+      if (raw === c.lastRaw) return
+      c.lastRaw = raw
+      const w = webState(c.stateNext)
+      if (w.json === c.lastState) return
+      void this.sendState(c, w.json, false, w.state)
     }, wait)
   }
 

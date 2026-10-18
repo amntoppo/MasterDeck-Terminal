@@ -437,7 +437,7 @@ buttons; it does not go through macOS window drag regions.
   832 KB for that state), sends `notice` when it can't, and the web's loading screen names each
   stage and times out after 15 s with the reason and Retry (`shared/webLoading.ts`, `Gate.tsx`;
   REMOTE "The web's state is fitted"). Checked: typecheck, vitest (242 files passed, 2 skipped;
-  3084 tests passed, 5 skipped), and the real-sized state measured in an isolated app with copies
+  3088 tests passed, 5 skipped), and the real-sized state measured in an isolated app with copies
   of this Mac's data. Not checked: the installed app with the live web app, a phone. The fix itself is the
   desktop's (it reaches Macs by OTA); the new web screens work with old desktops too (timeout and
   Retry instead of the notice), so the web deploy can go either side of it.

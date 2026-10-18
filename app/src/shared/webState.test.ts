@@ -58,6 +58,11 @@ describe('fitWebState (#168: the web never gets a state it cannot be sent)', () 
     expect(f.cut).toEqual(['teamPrsClosed', 'proposalsClosed', 'inboxHistory', 'pastSessions'])
   })
 
+  it('a null proposal entry does not throw (the bridge runs this in a timer in main)', () => {
+    const s = make({ proposals: [null as unknown as Proposal, prop(1, 'done')] })
+    expect(fitWebState(s).state.proposals[1].message).toBe('')
+  })
+
   it('does not change the state it was given', () => {
     const s = make({ proposals: [prop(1, 'done')] })
     fitWebState(s, 10)
