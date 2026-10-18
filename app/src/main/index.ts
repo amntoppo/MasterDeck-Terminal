@@ -4850,6 +4850,8 @@ app.whenReady().then(async () => {
         ).ok,
     ),
   );
+  // Threads a session replied to and left open wait on the user (#177).
+  sources.setPrThreads(() => prWatch.openThreads());
   setInterval(() => void prWatch.poll(), 60_000);
   // Automate Review: a read every 2 minutes per tab that has it on (at once when switched on), and
   // the next PR typed into a review session as soon as its turn is over.

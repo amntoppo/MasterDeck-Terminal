@@ -50,6 +50,8 @@ describe('own posts', () => {
   it('reads the body flags gh takes', () => {
     expect(commandBodies(`gh pr review 1 --comment -b 'short'; gh pr comment 1 --body=x; gh api x -F body="y z"; gh api x --raw-field body='w'`)).toEqual(['short', 'x', 'y z', 'w'])
     expect(commandBodies('echo hi')).toEqual([])
+    // The PR watch's reply template single-quotes the body: an apostrophe is written '\'' (#177).
+    expect(commandBodies(`gh api graphql -f query='q' -f id=PRRT_1 -f body='Doesn'\\''t apply: it'\\''s handled.'`)).toEqual(["Doesn't apply: it's handled."])
   })
   it('keeps the newest text and posts up to their caps', () => {
     const long = (w: string) => `${w} ${'is a long sentence about the change '.repeat(3)}`

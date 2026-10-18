@@ -432,6 +432,18 @@ buttons; it does not go through macOS window drag regions.
 
 ## Current state and next steps (2026-10-18)
 
+- **PR watch: sessions resolve the threads they handled (#177)** on branch
+  `worktree-MasterDeck-Terminal-177-resolve-threads` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). The message carries each thread's `PRRT_…`
+  id, file:line, link, the reply/resolve commands and the account; addressed and no-change threads
+  are replied to and resolved, ones needing the user replied to and left open (Needs you →
+  **REVIEW THREADS**); after the session's turn one reminder for threads with no reply; Details
+  lists each thread's outcome (ARCHITECTURE "PR watch", design and plan in
+  `docs/plans/2026-10-18-pr-watch-threads-*`). Checked: typecheck, vitest (242 files passed, 2
+  skipped; 3102 tests passed, 5 skipped), the new read query against GitHub (read-only), the
+  Details list and the Needs you card in the web preview (`/?preview`, 1400 px). Not checked: a live
+  session following the rule, the installed app, a phone. Open points: TODO ("PR watch, resolving threads").
+
 - **Watch any PR (#182)** on branch `worktree-182-watch-any-pr` (PR, not merged, **not
   installed**: the rebuild of the real app waits for the user's word). The eye on every open PR
   (Pull requests rows and popup) and **Watched PRs** with **Add** in the Review with Claude card;

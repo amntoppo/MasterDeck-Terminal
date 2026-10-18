@@ -42,7 +42,7 @@ import {
   parsePrView,
   PR_VIEW_ARGS,
 } from "@shared/git";
-import { collectItems, type Notice } from "@shared/inbox";
+import { collectItems, type InboxInput, type Notice } from "@shared/inbox";
 import { showsInNeedsYou } from "@shared/notifications";
 import type { ExternalItem } from "@shared/remote";
 import { Inbox } from "./inbox";
@@ -1078,6 +1078,10 @@ export class Sources {
   private watchedPrs: () => Set<string> = () => new Set();
   setWatchedPrs(f: () => Set<string>): void {
     this.watchedPrs = f;
+  }
+  private prThreads: () => NonNullable<InboxInput["prThreads"]> = () => [];
+  setPrThreads(f: () => NonNullable<InboxInput["prThreads"]>): void {
+    this.prThreads = f;
   }
   private autoReview: () => AutoReviewView | undefined = () => undefined;
   setAutoReview(f: () => AutoReviewView): void {
@@ -2546,6 +2550,7 @@ export class Sources {
       failures,
       external: this.externalItems,
       watchedPrs: this.watchedPrs(),
+      prThreads: this.prThreads(),
       // Only accounts MasterDeck uses, and only with two or more (one account is as before).
       ghAccounts: isMulti(this.config)
         ? this.ghAccounts.filter((a) => this.config.accounts.some((c) => c.login === a.login))

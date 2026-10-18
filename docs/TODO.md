@@ -1078,6 +1078,24 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   Details, so the next one can be seen with its message.
 - **Not checked:** a live PR with a same-account review reaching a session in the installed app.
 
+## PR watch, resolving threads (#177): open points (2026-10-18)
+
+- **P2 · A live run.** Checked by the suites only: a real session following the new rule (replying
+  and resolving with the given commands, "Waiting on the owner:" on one it leaves open), the
+  reminder reaching it, and the Needs you card and Details list in the installed app.
+- **P3 · "Left open" is any reply.** A thread the session replied to without resolving counts as
+  waiting on the user, whatever the reply says (no marker is parsed): a session that replies and
+  forgets to resolve puts it in Needs you instead of getting a reminder.
+- **P3 · The turn is guessed from the session's state.** A delivery's follow-up is due once the
+  session was seen at work and its turn is over again (as `canDeliver`), or after 10 minutes; a
+  turn shorter than the state poll is seen only by the 10-minute fallback.
+- **P3 · Outdated threads and unread transcripts.** An outdated thread whose last comment is by the
+  watch's account counts as the session's reply without the transcript check, and so does any
+  comment by that account when the transcript cannot be read: the user's own comment there shows
+  in Needs you as "the session replied and left it open".
+- **P3 · Comments and reviews are not followed.** Top-level PR comments and review bodies cannot be
+  resolved; the session is told to reply to each, but the check does not look for those replies.
+
 ## Setup with Claude (#156): open points (2026-10-17)
 
 - **P2 · A real run.** Checked with a stand-in `claude` and a fake `gh` only: a real Claude session
@@ -1095,6 +1113,13 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   it react by itself.
 
 ## Recently done
+
+- **PR watch: sessions resolve the review threads they handled (#177)**: the message gives each
+  thread's id, file:line and link, the reply and resolve commands and the account to post as, and
+  the rule (fixed or no change needed: reply and resolve; needs the user: reply "Waiting on the
+  owner:" and leave open). One reminder after the session's turn for threads left without a reply;
+  threads left open show in Needs you; Details lists each thread's outcome. Replaces #163's
+  "resolve only threads you addressed". Branch `worktree-MasterDeck-Terminal-177-resolve-threads`.
 
 - **Watch any PR (#182)**: an eye on every open PR in the Pull requests view and its popup (filled:
   watched, with where events go), and **Watched PRs** with an **Add** field in the Review with

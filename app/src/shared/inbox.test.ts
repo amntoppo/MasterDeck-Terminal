@@ -385,3 +385,25 @@ describe('notices (Settings → Notifications → Needs you)', () => {
     expect(RESOLVED_BECAUSE.notice).toBeTruthy()
   })
 })
+
+describe('review threads left open for the user (#177)', () => {
+  const th = (id: string, path = 'src/a.ts', line: number | null = 3) => ({ id, path, line, url: `https://github.com/acme/web/pull/1#${id}`, by: 'bob' })
+  const prThreads = (threads: ReturnType<typeof th>[], key = 'a') => [{ sessionKey: key, url: 'https://github.com/acme/web/pull/1', repo: 'web', number: 1, threads }]
+  it('one review item per PR, linked to the thread, opening the session; a new open thread is a new item', () => {
+    const one = collectItems(input({ sessions: [sess('a')], prThreads: prThreads([th('PRRT_1')]) }))
+    expect(one.map((i) => [i.kind, i.sessionKey, i.title, i.actions.map((a) => a.type)])).toEqual([['review', 'a', 'a · web#1', ['open']]])
+    expect(one[0].body).toBe('1 review thread waits on you: the session replied and left it open. src/a.ts:3 (bob).')
+    expect(one[0].detail).toEqual({ type: 'threads', url: 'https://github.com/acme/web/pull/1#PRRT_1', count: 1 })
+    const two = collectItems(input({ sessions: [sess('a')], prThreads: prThreads([th('PRRT_1'), th('PRRT_2', 'README.md', null)]) }))
+    expect(two[0].body).toContain('2 review threads wait on you')
+    expect(two[0].body).toContain('README.md (bob)')
+    expect(two[0].detail).toEqual({ type: 'threads', url: 'https://github.com/acme/web/pull/1/files', count: 2 })
+    expect(two[0].id).not.toBe(one[0].id)
+    expect(inboxNotice({ item: one[0], state: 'open', firstSeen: 0, lastSeen: 0 })?.title).toBe('Review threads: a · web#1')
+  })
+  it('nothing for a session that is gone or done, or with no open thread', () => {
+    expect(collectItems(input({ sessions: [], prThreads: prThreads([th('PRRT_1')]) }))).toEqual([])
+    expect(collectItems(input({ sessions: [sess('a', { state: 'done' })], prThreads: prThreads([th('PRRT_1')]) }))).toEqual([])
+    expect(collectItems(input({ sessions: [sess('a')], prThreads: prThreads([]) }))).toEqual([])
+  })
+})

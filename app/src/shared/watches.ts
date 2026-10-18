@@ -1,3 +1,5 @@
+import type { TrackedThread } from './prWatch'
+
 /**
  * Monitors run by MasterDeck (Settings → Monitors run by: MasterDeck). Claude Code stops every
  * monitor after 30 minutes; with this setting MasterDeck's hook catches a session's Monitor call,
@@ -35,6 +37,8 @@ export interface WatchInfo {
   okAt?: number
   /** PR watch: items by the session's account held back because its transcript could not be read. */
   unchecked?: number
+  /** PR watch: threads delivered to the session and their outcome (#177). */
+  threads?: TrackedThread[]
 }
 
 const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.slice(0, max) : '')

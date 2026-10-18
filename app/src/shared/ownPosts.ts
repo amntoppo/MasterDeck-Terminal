@@ -43,8 +43,19 @@ function strings(v: unknown, out: string[]): void {
 function shellWord(cmd: string, i: number): string {
   const q = cmd[i]
   if (q === "'") {
-    const end = cmd.indexOf("'", i + 1)
-    return cmd.slice(i + 1, end < 0 ? undefined : end)
+    let out = ''
+    let j = i
+    while (cmd[j] === "'") {
+      const end = cmd.indexOf("'", j + 1)
+      if (end < 0) return out + cmd.slice(j + 1)
+      out += cmd.slice(j + 1, end)
+      j = end + 1
+      // 'doesn'\''t': the quote closed, an escaped apostrophe, the quote reopened (#177's reply template).
+      if (!cmd.startsWith("\\''", j)) break
+      out += "'"
+      j += 2
+    }
+    return out
   }
   if (q === '"') {
     let out = ''

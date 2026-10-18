@@ -13,6 +13,7 @@ import {
   type PrWorst,
 } from "@shared/prDetail";
 import type { WatchEvent, WatchInfo } from "@shared/watches";
+import type { TrackedThread } from "@shared/prWatch";
 import type { NoteMeta } from "@shared/notes";
 import type { NoteTarget } from "@shared/noteEditor";
 import type { AppState, Session } from "@shared/types";
@@ -617,8 +618,42 @@ function WatchRow({ watch: w, title, now, ...row }: RowProps & { watch: WatchInf
           {w.unchecked} comment{w.unchecked === 1 ? "" : "s"} by the session's account not sent: MasterDeck could not read the session's transcript to tell them from its own replies.
         </div>
       )}
+      {!!w.threads?.length && <WatchThreads threads={w.threads} now={now} />}
       <WatchEvents watch={w} now={now} />
     </GhRow>
+  );
+}
+
+const OUTCOME: Record<TrackedThread["outcome"], [Tone, string]> = {
+  resolved: ["ok", "resolved"],
+  open: ["info", "waits on you"],
+  pending: ["wait", "no reply yet"],
+};
+
+/** The threads the PR watch sent the session, newest first, and what became of each (#177). */
+function WatchThreads({ threads, now }: { threads: TrackedThread[]; now: number }) {
+  return (
+    <div className="gh-events">
+      <div className="gh-meta muted">Threads sent to the session</div>
+      {[...threads].reverse().map((t) => (
+        <GhItem
+          key={t.id}
+          tone={OUTCOME[t.outcome][0]}
+          lead={
+            <>
+              <b>{OUTCOME[t.outcome][1]}</b>
+              {t.path ? <span className="mono gh-path"> {t.path}{t.line ? `:${t.line}` : ""}</span> : null}
+              {t.by ? <span className="muted"> · {t.by}</span> : null}
+              {t.reminded && t.outcome === "pending" ? <span className="muted"> · reminded</span> : null}
+            </>
+          }
+          text={t.text}
+          at={t.at}
+          url={t.url || null}
+          now={now}
+        />
+      ))}
+    </div>
   );
 }
 

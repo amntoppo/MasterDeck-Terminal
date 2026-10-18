@@ -90,7 +90,8 @@ export type InboxDetail =
   | { type: "mods"; keys: string[]; idle: string[] }
   | { type: "loop"; loopId: string; reason: string | null }
   | { type: "meeting"; meetingId: string; notice: MeetingNotice["kind"] }
-  | { type: "notice"; notify: NotifyTypeId; url?: string };
+  | { type: "notice"; notify: NotifyTypeId; url?: string }
+  | { type: "threads"; url: string; count: number };
 
 export interface InboxItem {
   /** Stable: the same situation keeps its id; a new situation (a new question, more context used…) gets a new one. */
@@ -249,6 +250,14 @@ export interface InboxInput {
   meetings?: MeetingNotice[];
   /** Events routed to Needs you (main/notices.ts). */
   notices?: Notice[];
+  /** Per watched PR, the threads its session replied to and left open (PrWatch.openThreads, #177). */
+  prThreads?: {
+    sessionKey: string;
+    url: string;
+    repo: string;
+    number: number;
+    threads: { id: string; path: string; line: number | null; url: string; by: string }[];
+  }[];
   now: number;
 }
 
@@ -500,6 +509,29 @@ export function collectItems(x: InboxInput): InboxItem[] {
         detail: { type: "budget", spend, cap },
       });
     }
+
+  // Threads the session replied to and left open: by the PR watch's rule only those needing the
+  // user stay open (#177). The set of threads is in the id, so another one left open is new.
+  for (const p of x.prThreads ?? []) {
+    const s = byKey.get(p.sessionKey);
+    if (!s || s.state === "done" || !p.threads.length) continue;
+    const n = p.threads.length;
+    const list = p.threads
+      .slice(0, 5)
+      .map((t) => `${t.path ? `${t.path}${t.line ? `:${t.line}` : ""}` : "a thread"} (${t.by})`)
+      .join(", ");
+    out.push({
+      id: `threads:${p.url}:${shortHash(p.threads.map((t) => t.id).sort().join(","))}`,
+      kind: "review",
+      priority: PRIORITY.review,
+      sessionKey: s.key,
+      ticket: sessionTicket(s),
+      title: `${s.name} · ${p.repo}#${p.number}`,
+      body: `${n} review thread${n === 1 ? "" : "s"} wait${n === 1 ? "s" : ""} on you: the session replied and left ${n === 1 ? "it" : "them"} open. ${list}${n > 5 ? ` and ${n - 5} more` : ""}.`,
+      actions: [{ type: "open", label: "Open" }],
+      detail: { type: "threads", url: n === 1 && p.threads[0].url ? p.threads[0].url : `${p.url}/files`, count: n },
+    });
+  }
 
   for (const o of prOffers(
     x.prs,
