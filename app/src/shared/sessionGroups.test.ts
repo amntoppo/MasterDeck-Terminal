@@ -3,6 +3,7 @@ import {
   ALL,
   applyGroupOp,
   carryGroup,
+  claimWaits,
   cleanName,
   emptyGroups,
   GROUP_MAX,
@@ -11,6 +12,7 @@ import {
   parseGroups,
   pruneGroups,
   shownTab,
+  type GroupWait,
   type SessionGroups,
 } from './sessionGroups'
 
@@ -106,6 +108,47 @@ describe('carryGroup', () => {
     const d = two()
     expect(carryGroup(d, 'zz', 'k9')).toBe(d)
     expect(carryGroup(d, 'k1', 'k1')).toBe(d)
+  })
+})
+
+describe('claimWaits', () => {
+  const wait = (o: Partial<GroupWait> = {}): GroupWait => ({ name: 'new-1', group: 'g00000001', skip: [], at: 0, ...o })
+  const live = (key: string, name: string, state = 'idle') => ({ key, name, state })
+  it('puts the session in its tab when it appears, on a later poll too', () => {
+    const d = two()
+    const w = [wait()]
+    const first = claimWaits(d, w, [live('k1', 'other')], 10)
+    expect(first.groups).toBe(d)
+    expect(first.waits).toBe(w)
+    const later = claimWaits(d, w, [live('k1', 'other'), live('n1', 'new-1', 'working')], 20)
+    expect(later.groups.of).toEqual({ ...d.of, n1: 'g00000001' })
+    expect(later.waits).toEqual([])
+    expect(d.of).toEqual(two().of)
+  })
+  it('never pulls in an older session of that name or a done one', () => {
+    const d = two()
+    const r = claimWaits(d, [wait({ skip: ['o1'] })], [live('o1', 'new-1'), live('o2', 'new-1', 'done')], 10)
+    expect(r.groups).toBe(d)
+    expect(r.waits).toHaveLength(1)
+  })
+  it('leaves a session already in a tab where it is', () => {
+    const d = two()
+    const r = claimWaits(d, [wait({ name: 'one' })], [live('k1', 'one')], 10)
+    expect(r.groups).toBe(d)
+    expect(r.waits).toEqual([])
+  })
+  it('drops the wait when its tab is deleted: the session stays in All', () => {
+    const gone = ok(applyGroupOp(two(), { op: 'remove', id: 'g00000001' }))
+    const r = claimWaits(gone, [wait()], [live('n1', 'new-1')], 10)
+    expect(r.groups).toBe(gone)
+    expect(r.waits).toEqual([])
+    expect(r.groups.of.n1).toBeUndefined()
+  })
+  it('drops the wait when the session never shows up in time', () => {
+    const d = two()
+    expect(claimWaits(d, [wait()], [], 100, 100).waits).toHaveLength(1)
+    expect(claimWaits(d, [wait()], [], 101, 100).waits).toEqual([])
+    expect(claimWaits(d, [wait()], [live('n1', 'new-1')], 101, 100).groups).toBe(d)
   })
 })
 

@@ -45,5 +45,38 @@ describe('SessionGroupStore', () => {
     s.prune(new Set(['other000']))
     expect(new SessionGroupStore(f).all().of).toEqual({})
   })
+  it('puts an expected session in its tab when it is listed, and keeps it there across a copy', () => {
+    let now = 0
+    const f = join(dir(), 'session-groups.json')
+    const s = new SessionGroupStore(f, () => now)
+    const id = s.act({ op: 'add', name: 'A' }).id!
+    s.expect('new-1', id, ['old00000'])
+    s.claim([{ key: 'old00000', name: 'new-1', state: 'idle' }])
+    expect(s.all().of).toEqual({})
+    now = 5_000
+    s.claim([{ key: 'new00001', name: 'new-1', state: 'working' }])
+    expect(new SessionGroupStore(f).all().of).toEqual({ new00001: id })
+    s.carry('new00001', 'copy0001')
+    expect(new SessionGroupStore(f).all().of).toEqual({ copy0001: id })
+  })
+  it('ignores All and unknown tabs, and forgets a failed start', () => {
+    const f = join(dir(), 'session-groups.json')
+    const s = new SessionGroupStore(f)
+    const id = s.act({ op: 'add', name: 'A' }).id!
+    s.expect('a', 'all', [])
+    s.expect('b', 'g99999999', [])
+    s.expect('c', id, [])
+    s.unexpect('c')
+    s.claim(['a', 'b', 'c'].map((n) => ({ key: `${n}0000000`, name: n, state: 'idle' })))
+    expect(s.all().of).toEqual({})
+  })
+  it('drops the wait when its tab is deleted first', () => {
+    const f = join(dir(), 'session-groups.json')
+    const s = new SessionGroupStore(f)
+    const id = s.act({ op: 'add', name: 'A' }).id!
+    s.expect('n', id, [])
+    s.act({ op: 'remove', id })
+    s.claim([{ key: 'n0000000', name: 'n', state: 'idle' }])
+    expect(s.all()).toEqual({ groups: [], of: {} })
+  })
 })
-

@@ -1,13 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { CliResult } from '@shared/types'
-import { applyGroupOp, carryGroup, emptyGroups, parseGroups, pruneGroups, type SessionGroups } from '@shared/sessionGroups'
+import {
+  ALL,
+  applyGroupOp,
+  carryGroup,
+  claimWaits,
+  emptyGroups,
+  parseGroups,
+  pruneGroups,
+  type GroupWait,
+  type SessionGroups,
+} from '@shared/sessionGroups'
 
 /** session-groups.json: the session list's tabs and which session is in which (Session.key). */
 export class SessionGroupStore {
   private d: SessionGroups = emptyGroups()
   private loaded = false
   private missingSince = new Map<string, number>()
+  /** Sessions started into a tab, not listed yet (#171). Memory only: a restart leaves them in All. */
+  private waits: GroupWait[] = []
 
   constructor(readonly file: string, private readonly now: () => number = Date.now) {}
 
@@ -55,6 +67,31 @@ export class SessionGroupStore {
     const next = carryGroup(this.load(), oldKey, newKey)
     if (next === this.d) return
     this.d = next
+    this.save()
+  }
+
+  /**
+   * A session is being started into `group` (#171): put it there when a poll first lists it.
+   * `skip`: keys of live sessions with that name already listed. All or an unknown tab: nothing.
+   */
+  expect(name: string, group: unknown, skip: string[]): void {
+    if (typeof group !== 'string' || group === ALL || !this.load().groups.some((g) => g.id === group)) return
+    this.unexpect(name)
+    this.waits = [...this.waits, { name, group, skip, at: this.now() }]
+  }
+
+  /** The start failed: nothing to wait for. */
+  unexpect(name: string): void {
+    this.waits = this.waits.filter((w) => w.name !== name)
+  }
+
+  /** Put the expected sessions a real session list now has in their tabs (shared/sessionGroups claimWaits). */
+  claim(sessions: { key: string; name: string; state: string }[]): void {
+    if (!this.waits.length) return
+    const r = claimWaits(this.load(), this.waits, sessions, this.now())
+    this.waits = r.waits
+    if (r.groups === this.d) return
+    this.d = r.groups
     this.save()
   }
 

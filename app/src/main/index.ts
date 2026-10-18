@@ -591,6 +591,11 @@ async function detectAllAs(env: Record<string, string>): Promise<{ ok: true; dat
   return fx ? { ok: true, data: JSON.parse(readFileSync(fx, "utf8")) } : cli.configDetectAll(env);
 }
 
+/** Keys of the live sessions named `name` now: a start into a tab never pulls those in (#171). */
+function liveKeysNamed(name: string): string[] {
+  return (latest?.sessions ?? []).filter((s) => s.name === name && s.state !== "done").map((s) => s.key);
+}
+
 /**
  * A Claude session without a ticket: `claude --bg -n <name> [--model] [first message]` in a folder.
  * New Claude session (`CH.startClaude`) and Schedules (#140) start through it.
@@ -605,6 +610,7 @@ async function startSession(raw: unknown): Promise<{ ok: true; message: string; 
     mode?: unknown;
     account?: unknown;
     peers?: unknown;
+    group?: unknown;
   };
   const mode =
     typeof o.mode === "string" &&
@@ -649,6 +655,7 @@ async function startSession(raw: unknown): Promise<{ ok: true; message: string; 
     workflows().setPending(name, o.workflow);
   const linked = livePeerKeys(o.peers);
   if (linked.length) peerStore.expect(name, linked);
+  sessionGroups.expect(name, o.group, liveKeysNamed(name));
   const r = await run(
     claudeBin,
     [
@@ -665,11 +672,13 @@ async function startSession(raw: unknown): Promise<{ ok: true; message: string; 
       timeoutMs: 60_000,
     },
   );
-  if (r.code !== 0)
+  if (r.code !== 0) {
+    sessionGroups.unexpect(name);
     return {
       ok: false,
       message: (r.stderr || r.stdout).trim().slice(0, 300),
     };
+  }
   if (as.account) {
     // On disk at once when claude printed the bg id (a quit before the first claim keeps it).
     const bg = bgIdFromOutput(r.stdout);
@@ -1067,9 +1076,12 @@ const sources = new Sources(
       if (state.sessions.length) modOff.prune(new Set(state.sessions.map((s) => s.key)));
     }
     state.modOff = modOff.all();
-    // Done sessions are still listed, so a stopped one keeps its tab until it is removed.
-    if (sources.isHealthy("agents") && state.sessions.length)
+    // Done sessions are still listed, so a stopped one keeps its tab until it is removed. A session
+    // started into a tab (#171) is put there before this state goes out.
+    if (sources.isHealthy("agents") && state.sessions.length) {
+      sessionGroups.claim(state.sessions);
       sessionGroups.prune(new Set(state.sessions.map((s) => s.key)));
+    }
     state.sessionGroups = sessionGroups.all();
     state.held = heldViews(heldStore.list());
     const beats = deckHooks.modBeats();
@@ -3329,7 +3341,13 @@ function registerIpc(): void {
       workflows().setPending(req.name, req.workflow);
     const peers = livePeerKeys(given?.peers);
     if (peers.length && typeof req.name === "string") peerStore.expect(req.name, peers);
-    return assignNow(req);
+    if (typeof req.name !== "string") return assignNow(req);
+    const name = req.name;
+    sessionGroups.expect(name, given?.group, liveKeysNamed(name));
+    return assignNow(req).then((r) => {
+      if (!r.ok) sessionGroups.unexpect(name);
+      return r;
+    });
   });
   reg.handle(CH.defaultModel, () => configuredModel(paths.claudeSettings));
   // The Refresh buttons: fetch from GitHub even when the shared gh cache has an answer.

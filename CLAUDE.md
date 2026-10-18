@@ -428,7 +428,20 @@ buttons; it does not go through macOS window drag regions.
   messages end with the `Co-Authored-By` line the session gives you.
 - Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release). A merge to `main` that changes the app is released to users automatically (`ota-main.yml`); a release by hand only when the user asks.
 
-## Current state and next steps (2026-10-17)
+## Current state and next steps (2026-10-18)
+
+- **A new session goes into the selected session-list tab (#171)** on branch
+  `worktree-MasterDeck-Terminal-171-new-session-tab` (PR, not merged, **not installed**: the
+  rebuild of the real app waits for the user's word). New Claude session and the Start dialog (the
+  Board's too) have a **Session list tab** field when a named tab exists (default: the tab on
+  screen); main keeps a pending target by name (`SessionGroupStore.expect` / `claim`,
+  `claimWaits`) and the list switches to the tab on Start. Design and plan:
+  `docs/plans/2026-10-18-new-session-tab-{design,plan}.md`. Checked: typecheck, vitest (240 files
+  passed, 2 skipped; 3074 tests passed, 5 skipped), the web preview (both dialogs at 1400 and 390
+  px), and the isolated app with a stand-in `claude` listing a new session only from its third
+  poll (claimed into its tab in the first state that listed it; a deleted tab and All left it in
+  All; the dialog's default, a start into the tab on screen selected there, All picked switching
+  the list to All). Open points: TODO ("A new session goes into the selected tab (#171)").
 
 - **Every merge to `main` publishes an OTA update (#166)** on branch
   `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR, not merged; nothing runs until it is on
