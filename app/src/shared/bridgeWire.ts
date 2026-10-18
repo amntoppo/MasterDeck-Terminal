@@ -19,3 +19,5 @@ export type MacToWeb =
   /** State patch: `ops` turn state n-1 into state n. */
   | { k: 'evp'; ev: string; n: number; ops: Operation[] }
   | { k: 'hello'; protocol: number; appVersion: string; platform: string; home: string }
+  /** The state could not be sent (#168): over the frame even after `fitWebState`. Older webs ignore it. */
+  | { k: 'notice'; ev: string; why: 'tooLarge'; bytes: number }

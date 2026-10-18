@@ -70,10 +70,11 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
-- `.github/workflows/` — `ci.yml` (Python tests, typecheck, vitest, unpublished DMG/EXE builds on PRs
-  and `main`), `release.yml` (a `v*` tag, or called: build, attach, then `ota-release.yml`, which
+- `.github/workflows/` — `ci.yml` (pull requests only: Python tests, typecheck, vitest, unpublished
+  DMG/EXE builds), `release.yml` (a `v*` tag, or called: build, attach, then `ota-release.yml`, which
   signs and publishes the in-app update) and `ota-main.yml`: **every merge to `main` that changes
-  the app is released to users** once CI passes (patch + 1 from the latest tag, or `package.json`'s
+  the app is released to users** (Actions: **Auto release**; runs on the push, its build runs the
+  tests again; patch + 1 from the latest tag, or `package.json`'s
   higher minor/major; a release commit only the tag holds; channel/rollout from the repo variables
   `OTA_MAIN_CHANNEL` / `OTA_MAIN_ROLLOUT`, `OTA_MAIN=off` pauses it; logic in
   `app/scripts/auto-release.mjs`). See [OPERATIONS § Release](docs/OPERATIONS.md#release).
@@ -434,18 +435,31 @@ buttons; it does not go through macOS window drag regions.
   `worktree-MasterDeck-Terminal-164-session-notes` (PR, not merged, **not installed**): Details →
   GitHub → Ticket shows the ticket's one note rendered and writes it in place with explicit saves
   that carry `base` (`TicketNote.tsx`, `shared/ticketNoteInline.ts`; ARCHITECTURE "Notes"). One note
-  per ticket, as the requester decided on the issue. Checked: typecheck, vitest (243 files: 241
+  per ticket, as the requester decided on the issue. Delete and an emptied note delete only the
+  version the draft started from (`notes:delete` with `base`). Checked: typecheck, vitest (241 files
   passed, 2 skipped), and the web preview at 1400 px (view, edit with Ctrl+Enter, a conflict with
   Reload and Keep mine, Esc, a change elsewhere showing by itself, saving empty, a new note from the
-  empty box, Show more). Not checked: the Electron window, the real web app, a phone, Windows.
+  empty box, Show more, a stale Delete shown as a conflict). Not checked: the Electron window, the real web app, a phone, Windows.
   Open points: TODO ("Ticket note in Details (#164)").
 
+- **The web app's "Loading sessions…" for ever (#168)** is fixed on branch
+  `worktree-168-web-loading-sessions` (PR, not merged, **not installed**). Root cause: the Mac's
+  state (1.21 MB of JSON, mostly finished master proposals with their prompts) was over the bridge
+  frame and was dropped with only a log line. The bridge fits each state (`shared/webState.ts`,
+  832 KB for that state), sends `notice` when it can't, and the web's loading screen names each
+  stage and times out after 15 s with the reason and Retry (`shared/webLoading.ts`, `Gate.tsx`;
+  REMOTE "The web's state is fitted"). Checked: typecheck, vitest (242 files passed, 2 skipped;
+  3088 tests passed, 5 skipped), and the real-sized state measured in an isolated app with copies
+  of this Mac's data. Not checked: the installed app with the live web app, a phone. The fix itself is the
+  desktop's (it reaches Macs by OTA); the new web screens work with old desktops too (timeout and
+  Retry instead of the notice), so the web deploy can go either side of it.
+
 - **Every merge to `main` publishes an OTA update (#166)** on branch
-  `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR, not merged; nothing runs until it is on
-  `main`, and then the next app merge is its first real run). `ota-main.yml` after CI, the version
+  `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR #167, merged 2026-10-18; the follow-up renames it **Auto release**, runs it on the push to
+  `main` and CI on pull requests only). `ota-main.yml`, the version
   and notes from `app/scripts/auto-release.mjs`, a release commit held only by the tag, then
   `release.yml` (now callable) and `ota-release.yml` (now takes a rollout when called); commit status
-  **OTA release** and a PR comment on failure. Spec and plan:
+  **Auto release** and a PR comment on failure. Spec and plan:
   `docs/superpowers/{specs,plans}/2026-10-18-ota-on-merge*`. Backend PR #12 was already merged
   (2026-10-15) and deployed. Checked: vitest for the script, actionlint, and the prepare job's shell
   run against a throwaway clone with stand-in `gh` / `curl` (first release, re-runs before and after

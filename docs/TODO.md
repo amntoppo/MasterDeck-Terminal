@@ -382,6 +382,14 @@ fixes it, and move the item here to "Recently done".
 
 ## Remote / web
 
+- **P2 · Web state budget (#168 follow-ups).** The rest of the state is still unbudgeted: a
+  very large board or `costBook` next to a long PR list can still pass the frame (then the web
+  says "Too much to send"). Approach: split the state over several frames, or move history-like
+  parts (`costBook`, `teamPrs`, finished proposals) behind their own calls. The Mac's Settings →
+  Remote does not yet say a browser got a cut or no state; and the hub does not send the Mac's
+  protocol, only `appVersion` (a mismatch is still found at hello). Not checked live: the
+  installed app with the real web app, `wrangler tail` (the backend was not touched).
+
 - **P1 · Drift test doesn't run in CI.** `app/src/shared/remote.drift.test.ts` skips without the
   backend checkout, and MasterDeck CI doesn't check it out (the backend repo is private). Approach:
   a CI step that checks out `amntoppo/masterdeck-backend` with a read-only deploy key / fine-grained
@@ -904,11 +912,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   after this PR is its first run (and, if no tag came before it, the first real upload to R2). Look
   at: the commit status on the merge commit, the tag's release commit, the GitHub release's text,
   Settings → Updates on an installed 0.9.x (installs before #122's updater need one manual update).
-- **P2 · Every app merge builds twice.** CI builds unpublished installers on `main`, then
-  `release.yml` builds the release (CI's builds carry the old version). Upgrade path: skip CI's
-  build job on pushes to `main` once the automatic release has run reliably.
+- **P2 · Branch protection.** CI runs on pull requests only, so a push straight to `main` (or a
+  PR merged with red CI) is checked only by the release build's tests. Require CI on `main`
+  (repository → Settings → Branches) so every merge has passed it.
 - **P3 · The non-app file list is fixed** (`isAppFile` in `app/scripts/auto-release.mjs`): a new
-  docs or tooling folder releases once until it is added there.
+  docs or tooling folder releases once until it is added there (and to `IGNORED_PATHS` /
+  `paths-ignore`).
 - **P3 · A tag protection rule** or ruleset on `v*` would refuse the workflow's `GITHUB_TOKEN`
   push; none is set today.
 
@@ -1053,11 +1062,22 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   saves carry `base` (Changed / Deleted elsewhere with Reload / Keep mine, Discard / Keep), live
   updates, **Open in Notes**. Design and plan: `docs/plans/2026-10-18-ticket-note-inline-*`. Branch
   `worktree-MasterDeck-Terminal-164-session-notes`.
+
+- **The web app no longer stays on "Loading sessions…" (#168)**: root cause, a state over the
+  bridge frame (a real Mac's was 1.21 MB of JSON, 560 KB of it finished master proposals with
+  their prompts, 285 KB the PRs view) was dropped on the Mac with only a log line. The bridge now
+  fits every state (`shared/webState.ts`), sends a `notice` when it still can't, and the web's
+  loading screen names each stage, times out after 15 s with the reason and Retry, and names the
+  versions on a protocol mismatch (`shared/webLoading.ts`, `Gate.tsx`). Branch
+  `worktree-168-web-loading-sessions`.
+
 - **Every merge to `main` publishes an OTA update (#166)**: `.github/workflows/ota-main.yml` after
   CI, patch + 1 (or `package.json`'s minor/major), a release commit held only by the tag, notes from
   the merged PRs, `release.yml` called, channel/rollout from repository variables, a commit status
   and a PR comment on failure, yank documented (OPERATIONS § Release). Backend PR #12 was already
-  merged. Branch `worktree-MasterDeck-Terminal-166-ota-on-merge`.
+  merged. Branch `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR #167). Follow-up: the workflow
+  is called **Auto release** and runs on the push to `main` (`paths-ignore`); `ci.yml` runs on pull
+  requests only, so a merge is no longer built twice.
 
 - **PR watch delivers same-account reviews and shows read failures (#158)**: an item by the
   watch's own account is held back only when the session's transcript shows it posted that text
