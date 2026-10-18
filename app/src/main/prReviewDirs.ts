@@ -296,8 +296,9 @@ logline() {
   jq -cn --arg id "$bid" --arg url "$pr" --arg st "$1" --arg note "\${2:-}" --arg rev "\${3:-}" --argjson c "\${4:-0}" \\
     '{at: (now | floor), id: $id, url: $url, status: $st} + (if $note != "" then {note: $note} else {} end) + (if $rev != "" then {review: $rev, comments: $c} else {} end)' >> "$l"
 }
-# A refusal after the batch PR was taken: logged as failed, then said.
-fail() { [ -n "$dry" ] || logline failed "$1"; err "$1"; }
+# A refusal after the batch PR was taken: its claim let go, logged as failed, then said.
+claim=''
+fail() { [ -z "$claim" ] || rmdir "$claim" 2>/dev/null; [ -n "$dry" ] || logline failed "$1"; err "$1"; }
 bid=''
 if [ -n "$batch" ]; then
   [ -n "$pr" ] || usage
@@ -370,6 +371,12 @@ fi
 if [ -n "$dry" ]; then
   jq -c --arg pr "$pr" '{ok: true, dryRun: true, pr: $pr, review: .}' "$tmp"
   exit 0
+fi
+# One post per batch entry: claimed at once (mkdir either makes it or finds it), kept once posted.
+if [ -n "$batch" ]; then
+  mkdir -p "$l.d" 2>/dev/null
+  mkdir "$l.d/$bid" 2>/dev/null || err "refusing: a review of $pr is already being posted for this batch"
+  claim="$l.d/$bid"
 fi
 acct="$(jq -r '.account // empty' "$g" 2>/dev/null)"
 if [ -n "$acct" ]; then

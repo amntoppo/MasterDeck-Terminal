@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BatchItem } from '@shared/reviewBatch'
@@ -112,6 +112,30 @@ describe('ReviewBatch', () => {
     expect(r).toEqual({ ok: true, message: 'Queued acme/web#2 again', prompt: '[MasterDeck batch-review] Review these PRs as "Batch reviews" in CLAUDE.md says: acme/web#2.' })
     expect(w.batches.t).toEqual([{ url: url(2), id: 'id4' }])
     expect(b.view().t.running).toBe(true)
+  })
+
+  it('a post that lands after Cancel batch is still read, also when a new batch starts', () => {
+    const w = world()
+    const b = w.make()
+    b.add('t', [url(1), url(2)], PRS)
+    b.cancel('t')
+    w.log('t', { id: 'id1', url: url(1), status: 'posted', review: 'r1', comments: 1 })
+    b.tick()
+    expect(b.view().t.items[0]).toMatchObject({ status: 'posted', reviewUrl: 'r1' })
+    // Retry never offers a second review of it.
+    expect(b.retry('t', url(1)).ok).toBe(false)
+    w.log('t', { id: 'id2', url: url(2), status: 'posted', review: 'r2' })
+    mkdirSync(`${w.deps.logFile('t')}.d/id2`, { recursive: true })
+    // Read before the log is emptied for the new batch, and the old claims go with it.
+    b.add('t', [url(3)], PRS)
+    expect(existsSync(`${w.deps.logFile('t')}.d`)).toBe(false)
+    expect(b.view().t.items.map((i) => i.number)).toEqual([3])
+  })
+
+  it('refuses a tab id that is not one (a browser’s __proto__)', () => {
+    const b = world().make()
+    expect(b.cancel('__proto__')).toEqual({ ok: true, message: 'no batch' })
+    expect(b.retry('constructor', url(1)).ok).toBe(false)
   })
 
   it('is kept across a restart, with the log offset (no line applied twice); forget drops a closed tab', () => {

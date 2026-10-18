@@ -260,7 +260,7 @@ soon as it is done, without asking. A later such message while you work adds PRs
 1. Re-read \`context.json\`. Take the named PRs whose \`batch\` status is \`queued\`.
 2. Start one subagent (the Agent tool) per PR, at most 4 at a time; start the next as one ends.
    Don't wait for the whole batch: each subagent posts its own review. A subagent does not read
-   this file: give it the PR's URL and number, \`account\`, and steps a to g below, word for word.
+   this file: give it the PR's URL, its \`id\` in \`batch\`, \`account\`, and steps a to g below, word for word.
 3. When every PR is done, answer with one line per PR: posted (comments, review URL), skipped
    (why) or failed (why).
 
@@ -271,10 +271,11 @@ b. Unchanged since the last review? \`gh pr view <url> --json headRefOid,reviews
    review by \`account\` is of the commit \`headRefOid\`, run
    \`${auto} --batch --skip "no changes since the last review" --pr <url>\` and stop.
 c. Read and review the PR as "Reading a PR" and "Reviewing" say.
-d. Write the review to \`batch-<number>.md\`: a short summary, then the points that matter
-   (nothing important found: say so in a line), and comments on lines to \`batch-<number>.json\`
+d. Write the review to \`batch-<id>.md\` (its \`id\`, never its number: two repositories can have
+   the same number): a short summary, then the points that matter (nothing important found: say so
+   in a line), and comments on lines to \`batch-<id>.json\`
    (as in "Posting to GitHub").
-e. Post it: \`${auto} --batch --pr <url> --body-file batch-<number>.md [--comments-file batch-<number>.json]\`
+e. Post it: \`${auto} --batch --pr <url> --body-file batch-<id>.md [--comments-file batch-<id>.json]\`
 f. When it could not review the PR (an error, no access): \`${auto} --batch --fail "<why, one line>" --pr <url>\`
 g. Answer with one line: the PR, posted / skipped / failed, the comment count and the review's URL.
 

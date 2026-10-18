@@ -253,7 +253,8 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
 
   // Review selected (#176): the PRs ticked in each tab, and the tab's batch as main has it.
   const [ticked, setTicked] = useState<Record<string, string[]>>({})
-  const ticks = ticked[tab.id] ?? []
+  // What is ticked in the tab; only the ones shown count (`ticks`, below the list's filters).
+  const ticksKept = ticked[tab.id] ?? []
   const setTicks = (fn: (cur: string[]) => string[]) => setTicked((t) => ({ ...t, [tab.id]: fn(t[tab.id] ?? []) }))
   const anchor = useRef<string | null>(null)
   const batch = state.reviewBatch?.[tab.id]
@@ -299,6 +300,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const active = activeFilterCount(f)
   // Only open PRs can be reviewed: the ones a tick, a range and Select all take.
   const tickable = useMemo(() => shown.filter((p) => p.state === 'open').map((p) => p.url), [shown])
+  const ticks = useMemo(() => ticksKept.filter((u) => tickable.includes(u)), [ticksKept, tickable])
   const allTicked = tickable.length > 0 && tickable.every((u) => ticks.includes(u))
   /** A row's tick: toggled; with Shift, every open row from the last one ticked to this one. */
   const tick = (url: string, range: boolean) => {
@@ -312,7 +314,10 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   }
   /** A click on a row: ⌘/Ctrl ticks it, Shift a range; a plain click selects one PR, as before. */
   const rowClick = (e: React.MouseEvent, p: TeamPr) => {
-    if ((e.metaKey || e.ctrlKey || e.shiftKey) && p.state === 'open') {
+    const mods = e.metaKey || e.ctrlKey || e.shiftKey
+    // A row's own buttons and links do their own thing: a modifier on them ticks nothing.
+    if (mods && (e.target as HTMLElement).closest('button, a, input')) return
+    if (mods && p.state === 'open') {
       e.preventDefault()
       return tick(p.url, e.shiftKey)
     }

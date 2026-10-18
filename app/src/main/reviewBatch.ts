@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, readSync, renameSync, statSync, truncateSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
@@ -103,8 +103,11 @@ export class ReviewBatch {
     const fresh = !isRunning(prev)
     const r = addToBatch(prev, urls as string[], prs, this.now(), this.id)
     if (r.added.length) {
-      // A new batch: the old log's lines name ids that are gone.
-      if (fresh) this.resetLog(tabId)
+      // A new batch: what the old log still holds is read first (a post after Cancel), then it goes.
+      if (fresh) {
+        this.read(tabId)
+        this.resetLog(tabId)
+      }
       this.tabs[tabId] = r.tab
       this.changed(tabId)
     }
@@ -123,7 +126,7 @@ export class ReviewBatch {
 
   /** Cancel batch: no more posts for what is not posted yet. `forget`: the tab is gone (closed in the window). */
   cancel(tabId: unknown, forget = false): BatchResult {
-    if (typeof tabId !== 'string' || !this.tabs[tabId]) return { ok: true, message: 'no batch' }
+    if (typeof tabId !== 'string' || !TICKET_TAB.test(tabId) || !Object.hasOwn(this.tabs, tabId)) return { ok: true, message: 'no batch' }
     const n = cancelBatch(this.tabs[tabId], this.now())
     if (forget) {
       this.write(tabId)
@@ -139,7 +142,7 @@ export class ReviewBatch {
 
   /** Retry one PR (failed, skipped or cancelled): queued again, and its line to type. */
   retry(tabId: unknown, url: unknown): BatchResult {
-    if (typeof tabId !== 'string' || !this.tabs[tabId] || typeof url !== 'string') return { ok: false, message: 'no such PR in the batch' }
+    if (typeof tabId !== 'string' || !TICKET_TAB.test(tabId) || !Object.hasOwn(this.tabs, tabId) || typeof url !== 'string') return { ok: false, message: 'no such PR in the batch' }
     const i = retryItem(this.tabs[tabId], url, this.now(), this.id)
     if (!i) return { ok: false, message: 'that PR is being reviewed or was posted' }
     this.changed(tabId)
@@ -148,52 +151,61 @@ export class ReviewBatch {
 
   private resetLog(tabId: string): void {
     this.offsets[tabId] = 0
+    const log = this.deps.logFile(tabId)
     try {
-      truncateSync(this.deps.logFile(tabId), 0)
+      truncateSync(log, 0)
     } catch {
       /* none yet */
     }
+    // The post script's claims (one folder per posted id): the old ids are gone with the log.
+    rmSync(`${log}.d`, { recursive: true, force: true })
   }
 
-  /** Reads what each tab's post script logged since the last tick. */
+  /**
+   * What a tab's post script logged since the last read, folded in; whether anything was read. Every
+   * tab is read, also one whose PRs all ended: a post that lands after Cancel batch must show.
+   */
+  private read(tabId: string): boolean {
+    const t = this.tabs[tabId]
+    const file = this.deps.logFile(tabId)
+    let size: number
+    try {
+      size = statSync(file).size
+    } catch {
+      return false
+    }
+    let from = this.offsets[tabId] ?? 0
+    // Shorter than read: a new log (truncated); read it from the start.
+    if (size < from) from = 0
+    if (size === from) return false
+    const len = Math.min(size - from, READ_MAX)
+    const buf = Buffer.alloc(len)
+    let fd: number | null = null
+    try {
+      fd = openSync(file, 'r')
+      readSync(fd, buf, 0, len, from)
+    } catch {
+      return false
+    } finally {
+      if (fd !== null) closeSync(fd)
+    }
+    // Only whole lines: one being written is read on the next tick.
+    const end = buf.lastIndexOf(0x0a)
+    if (end < 0) {
+      if (len === READ_MAX) this.offsets[tabId] = from + len
+      return false
+    }
+    this.offsets[tabId] = from + end + 1
+    let moved = false
+    for (const line of parseLogLines(buf.subarray(0, end + 1).toString('utf8'))) moved = applyLine(t, line, this.now()) || moved
+    if (moved) this.write(tabId)
+    return true
+  }
+
+  /** Reads what each tab's post script logged since the last tick (a stat per tab when nothing changed). */
   tick(): void {
     let any = false
-    for (const [tabId, t] of Object.entries(this.tabs)) {
-      if (!activeEntries(t).length) continue
-      const file = this.deps.logFile(tabId)
-      let size: number
-      try {
-        size = statSync(file).size
-      } catch {
-        continue
-      }
-      let from = this.offsets[tabId] ?? 0
-      // Shorter than read: a new log (truncated); read it from the start.
-      if (size < from) from = 0
-      if (size === from) continue
-      const len = Math.min(size - from, READ_MAX)
-      const buf = Buffer.alloc(len)
-      let fd: number | null = null
-      try {
-        fd = openSync(file, 'r')
-        readSync(fd, buf, 0, len, from)
-      } catch {
-        continue
-      } finally {
-        if (fd !== null) closeSync(fd)
-      }
-      // Only whole lines: one being written is read on the next tick.
-      const end = buf.lastIndexOf(0x0a)
-      if (end < 0) {
-        if (len === READ_MAX) this.offsets[tabId] = from + len
-        continue
-      }
-      this.offsets[tabId] = from + end + 1
-      let moved = false
-      for (const line of parseLogLines(buf.subarray(0, end + 1).toString('utf8'))) moved = applyLine(t, line, this.now()) || moved
-      if (moved) this.write(tabId)
-      any = true
-    }
+    for (const tabId of Object.keys(this.tabs)) any = this.read(tabId) || any
     if (any) {
       this.save()
       this.deps.onChange()

@@ -1097,11 +1097,16 @@ here (needs `hooks.queue`).
   …`) into the tab's session, or starts it with that line. The briefing's **Batch reviews** has the
   session run one subagent per PR, at most 4 at a time, each posting on its own with the post
   script's `--batch` form (allowed unasked by `Bash(<post> --batch:*)`): a COMMENT only, only to an
-  entry of the batch file, once per id (the log has no `posted` for it); `--batch --start`,
+  entry of the batch file, once per id (the log has no `posted` for it, and the run claims the id
+  first with an atomic `mkdir <log>.d/<id>`, let go when the post fails; a second run in flight is
+  refused). The session names its files by the entry's id (`batch-<id>.md`: two repositories can
+  share a number); `--batch --start`,
   `--skip <why>` (unchanged since the account's last review) and `--fail <why>` log a step without
   posting. Every batch step, and a failed post (GitHub refused, wrong account), appends one JSON line
   to `pr-review-guard/tab-<id>.batch-log.jsonl`; `ReviewBatch.tick` (in the 2 s Automate Review
-  interval) reads it from the kept offset, whole lines only, and folds each line in (`applyLine`: an
+  interval) reads every tab's log (also one whose PRs all ended: a post can land after Cancel batch;
+  a new batch reads it once more before emptying it and the claims) from the kept offset, whole
+  lines only, and folds each line in (`applyLine`: an
   unknown or old id, or a cancelled entry, changes nothing; `posted` always counts). The asked form
   accepts the selected PR or any entry (any event, the user approves the run) and logs `posted` for
   an entry. `CH.reviewBatchCancel` marks what is not posted `cancelled` and drops it from the batch

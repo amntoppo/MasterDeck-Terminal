@@ -279,6 +279,17 @@ exit 9
       writeFileSync(join(w.home, 'bin', 'gh'), '#!/usr/bin/env bash\nif [ "$1 $2" = "api user" ]; then echo alice; exit 0; fi\necho "HTTP 422: Unprocessable" >&2; exit 1\n')
       expect(w.run(['--batch', '--pr', P1, '--body-file', 'review.md']).out.error).toMatch(/GitHub refused the review: HTTP 422/)
       expect(log(w.home)).toEqual([{ id: 'b1', url: P1, status: 'failed', note: 'GitHub refused the review: HTTP 422: Unprocessable' }])
+      // Its claim was let go: the session may post it once GitHub answers.
+      expect(existsSync(`${prReviewBatchLog(prReviewGuard(w.home, 'a'))}.d/b1`)).toBe(false)
+    })
+    it('a post already claimed for an entry (another run in flight) is refused', () => {
+      const w = batched()
+      mkdirSync(`${prReviewBatchLog(prReviewGuard(w.home, 'a'))}.d/b1`, { recursive: true })
+      expect(w.run(['--batch', '--pr', P1, '--body-file', 'review.md']).out.error).toMatch(/already being posted/)
+      expect(existsSync(join(w.home, 'posted.json'))).toBe(false)
+      // The other entry posts, and keeps its claim.
+      expect(w.run(['--batch', '--pr', P2, '--body-file', 'review.md']).out.ok).toBe(true)
+      expect(existsSync(`${prReviewBatchLog(prReviewGuard(w.home, 'a'))}.d/b2`)).toBe(true)
     })
     it('the asked form takes the selected PR or a PR of the batch (any event), and logs a batch PR', () => {
       const w = batched()

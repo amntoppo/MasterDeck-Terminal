@@ -134,6 +134,9 @@ describe('prReviewBriefing', () => {
       expect(b).toContain(`${post} ${f}`)
     expect(b).toMatch(/`--batch` is always a comment review: never approve, never request changes, never merge/)
     expect(b).toMatch(/or to a PR of `batch` that is not posted/)
+    // Files by the entry's id: acme/api#12 and acme/web#12 never share one.
+    expect(b).toContain('--body-file batch-<id>.md [--comments-file batch-<id>.json]')
+    expect(b).not.toContain('batch-<number>')
   })
 })
 
