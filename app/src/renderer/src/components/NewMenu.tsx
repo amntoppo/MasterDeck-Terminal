@@ -23,6 +23,9 @@ import { RepoPicker } from "./RepoPicker";
 import { PeerPicker } from "./PeerPicker";
 import { peerFactsFor, type PeerSummaries } from "./peersView";
 import { peersPromptBlock } from "@shared/prompt";
+import { shownTab } from "@shared/sessionGroups";
+import { SessionTabSelect } from "./SessionGroupBar";
+import { pickedGroup } from "../sessionGroupPick";
 
 export type Repo = { name: string; path: string };
 
@@ -194,6 +197,8 @@ export interface NewSessionReq {
   account?: string;
   /** Session keys to link the new session to (two-way). */
   peers?: string[];
+  /** The session list's tab (#171) the new session goes into once listed; "all" or absent: none. */
+  group?: string;
 }
 
 /** Permission modes offered (the ones that skip checks are left out). */
@@ -250,6 +255,8 @@ export function NewSessionDialog({
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflow, setWorkflow] = useState(DEFAULT_TEMPLATE);
   const [mode, setMode] = useState("");
+  // The session list's tab it goes into (#171): the one on screen unless picked here.
+  const [group, setGroup] = useState(() => shownTab(state.sessionGroups, pickedGroup()));
   const [picking, setPicking] = useState(false);
   // Each account's last choices (#153): read once per dialog, written on Start.
   const multi = isMulti(state.config);
@@ -372,6 +379,7 @@ export function NewSessionDialog({
       mode: mode || undefined,
       ...(account ? { account } : {}),
       ...(peers.length ? { peers } : {}),
+      ...(state.sessionGroups?.groups.length ? { group: shownTab(state.sessionGroups, group) } : {}),
     });
     // These become the account's last choices; name, message and peers are this session's only.
     save(NEW_SESSION_PREFS_KEY, rememberChoice(prefs.current!, multi, account, { cwd, model, workflow, mode }));
@@ -511,6 +519,7 @@ export function NewSessionDialog({
             </option>
           ))}
         </select>
+        <SessionTabSelect id="ns-group" groups={state.sessionGroups} value={group} onChange={setGroup} />
         <div className="meta">
           It runs in the background (claude --bg): it keeps going when
           MasterDeck closes, and shows under Sessions.

@@ -1003,6 +1003,16 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   up under the pointer. Make it stick with the Filters line if that turns out awkward.
 - No keyboard way to reorder tabs other than the menu's Move left / right; no ⌘1… shortcuts.
 
+## A new session goes into the selected tab (#171): open points (2026-10-18)
+
+- Not covered: **Resume a past session…**, **New terminal** (a shell), a PR review started from the
+  PR popup, master's spawns and schedules: they land in All as before.
+- The pending target is kept in memory: quitting MasterDeck before the session is listed leaves it
+  in All. It is matched by name; a session of the same name started elsewhere in that window would
+  be taken (the live ones already listed are skipped).
+- Not checked: the real web app over the bridge (same requests; the preview showed both dialogs),
+  a real `claude --bg`, a held start retried later (the retry sends the tab again), Windows.
+
 ## Notifications: open points (2026-10-17, issue #135)
 
 - **P3 · Notices never clear themselves.** A "Session finished" notice stays until Done or three
@@ -1076,6 +1086,11 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   deployed on merge (`web-deploy.yml`), the drift test wired for CI (`BACKEND_DEPLOY_KEY`). Branch
   `worktree-178-ci-cd-fast-cycle`.
 
+- **A new session goes into the selected session-list tab (#171)**: New Claude session and the
+  Start dialog (also from the Board) have a **Session list tab** field when a named tab exists,
+  defaulting to the tab on screen; main puts the session in it when it is first listed (a pending
+  target matched by name, dropped after 10 minutes or when the tab is deleted); the list switches to
+  the tab on Start. Branch `worktree-MasterDeck-Terminal-171-new-session-tab`.
 - **The web app no longer stays on "Loading sessions…" (#168)**: root cause, a state over the
   bridge frame (a real Mac's was 1.21 MB of JSON, 560 KB of it finished master proposals with
   their prompts, 285 KB the PRs view) was dropped on the Mac with only a log line. The bridge now
