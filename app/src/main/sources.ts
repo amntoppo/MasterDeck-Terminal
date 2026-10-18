@@ -1144,6 +1144,7 @@ export class Sources {
             : (this.costBook[id]?.issueRepo ?? null),
           cost: st.costUsd,
           startedAt: s?.startedAt ?? null,
+          account: s?.account,
         });
     }
     this.allStats = next;
