@@ -36,9 +36,18 @@ export function sessionFileCall(
  */
 export function remoteSettings(patch: unknown, current: object): Record<string, unknown> {
   const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? (patch as Record<string, unknown>) : {}
-  const c = current as { remoteEnabled?: unknown; theme?: unknown; autoDownloadUpdates?: unknown; updateChannel?: unknown }
-  // A browser never updates the Mac, so it never changes how the Mac updates either.
-  return { ...current, ...p, remoteEnabled: c.remoteEnabled, theme: c.theme, autoDownloadUpdates: c.autoDownloadUpdates, updateChannel: c.updateChannel }
+  const c = current as { remoteEnabled?: unknown; theme?: unknown; autoDownloadUpdates?: unknown; updateChannel?: unknown; startView?: unknown }
+  // A browser never updates the Mac, so it never changes how the Mac updates either. Open on
+  // (startView) is the Mac's; a browser keeps its own (md.startView).
+  return {
+    ...current,
+    ...p,
+    remoteEnabled: c.remoteEnabled,
+    theme: c.theme,
+    autoDownloadUpdates: c.autoDownloadUpdates,
+    updateChannel: c.updateChannel,
+    startView: c.startView,
+  }
 }
 
 /** Only dirs the deck already knows (workspace repos, session cwds); path.resolve normalises trailing slashes and `..`. */

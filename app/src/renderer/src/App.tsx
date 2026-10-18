@@ -24,6 +24,7 @@ import {
 } from "./components/CommandPalette";
 import { CostsView } from "./components/CostsView";
 import { JanitorView } from "./components/HygieneViews";
+import { DashboardView } from "./components/DashboardView";
 import { MeetingsView, type MeetingTarget } from "./components/MeetingsView";
 import { meetingsHere, setMeetingOpener } from "./meetingLinks";
 import { PrsView } from "./components/PrsView";
@@ -52,7 +53,7 @@ import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { SchedulesView } from "./components/SchedulesView";
 import { Sidebar, type View } from "./components/Sidebar";
-import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone } from "./web";
+import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone, webStartView } from "./web";
 import { accountLabel, isMulti } from "@shared/accounts";
 import { SessionAccount } from "./components/AccountBits";
 import { QUICK_KEYS } from "./quickKeys";
@@ -211,9 +212,12 @@ export function App() {
     load<boolean>("masterOpen", true),
   );
   const [view, setView] = useState<View>(() => {
+    // Open on (#183): the web's choice is this browser's; the Mac's comes with the first state (below).
+    if (isWeb() && webStartView() === "dashboard") return "dashboard";
     const v = load<string>("view", isWeb() ? "tasks" : "terminals");
     return (
       [
+        "dashboard",
         "terminals",
         "board",
         "prs",
@@ -229,6 +233,9 @@ export function App() {
       ? (v as View)
       : "terminals";
   });
+  // The view this launch opened on, and whether the Mac's Open on was applied (once; the web's is above).
+  const [bootView] = useState(view);
+  const [startApplied, setStartApplied] = useState(isWeb);
   // Phone only: the session list, the open screen (a terminal or a view), or master; and the panel sheet.
   const [phoneScreen, setPhoneScreen] = useState<PhoneScreen>(() =>
     view === "terminals" ? "list" : "main",
@@ -1054,6 +1061,15 @@ export function App() {
     };
   }, [dragging, masterOpen, masterPct, state?.config.masterEnabled]);
 
+  // Open on (#183), the Mac: its setting comes with the first state, and nothing but "Loading
+  // sessions…" is drawn before it. Set during this render, before any view mounts, so another view
+  // never flashes (or attaches its terminals) first; skipped when the view already changed (a
+  // notification, a shortcut).
+  if (state && !startApplied) {
+    setStartApplied(true);
+    if (state.settings.startView === "dashboard" && view === bootView) setView("dashboard");
+  }
+
   if (!state) {
     return (
       <div className="welcome">
@@ -1389,6 +1405,7 @@ export function App() {
           }}
         />
       )}
+      {view === "dashboard" && <DashboardView state={state} />}
       {view === "costs" && (
         <CostsView state={state} onOpenSession={openSession} />
       )}

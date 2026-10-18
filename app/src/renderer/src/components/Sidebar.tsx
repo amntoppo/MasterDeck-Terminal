@@ -50,6 +50,7 @@ import { heldForTrust, isNotTrusted } from "@shared/trust";
 import { TrustNote, useTrust } from "./TrustFix";
 
 export type View =
+  | "dashboard"
   | "terminals"
   | "board"
   | "prs"

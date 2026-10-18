@@ -24,9 +24,15 @@ describe('railOrder', () => {
     expect(o.at(-1)).toBe('board')
   })
 
-  it('a new first icon goes first', () => {
-    const o = railOrder(D.filter((id) => id !== 'terminals'))
-    expect(o[0]).toBe('terminals')
+  it('the Dashboard is first by default', () => {
+    expect(RAIL_DEFAULT[0]).toBe('dashboard')
+  })
+
+  it('a saved order without it gets it first', () => {
+    // An order saved before the Dashboard existed, with Settings moved to the top.
+    const saved = moveTo(D, 'settings', 0).filter((id) => id !== 'dashboard')
+    const o = railOrder(saved)
+    expect(o.slice(0, 3)).toEqual(['dashboard', 'settings', 'terminals'])
   })
 
   it('skips ids it does not know, but Settings keeps them', () => {
@@ -57,9 +63,9 @@ describe('cleanRailOrder', () => {
 
 describe('moveTo', () => {
   it('moves an icon up and down', () => {
-    expect(moveTo(D, 'tasks', 0).slice(0, 2)).toEqual(['tasks', 'terminals'])
-    const down = moveTo(D, 'terminals', 2)
-    expect(down.slice(0, 3)).toEqual(['board', 'terminals', 'prs'])
+    expect(moveTo(D, 'tasks', 0).slice(0, 2)).toEqual(['tasks', 'dashboard'])
+    const down = moveTo(D, 'terminals', 3)
+    expect(down.slice(0, 4)).toEqual(['dashboard', 'board', 'terminals', 'prs'])
   })
 
   it('moves an icon from the top group to the bottom one and back', () => {
@@ -89,8 +95,8 @@ describe('moveTo', () => {
 
 describe('moveStep', () => {
   it('swaps with the next icon', () => {
-    expect(moveStep(D, 'board', 1, all).slice(0, 3)).toEqual(['terminals', 'prs', 'board'])
-    expect(moveStep(D, 'board', -1, all).slice(0, 2)).toEqual(['board', 'terminals'])
+    expect(moveStep(D, 'board', 1, all).slice(0, 4)).toEqual(['dashboard', 'terminals', 'prs', 'board'])
+    expect(moveStep(D, 'board', -1, all).slice(0, 3)).toEqual(['dashboard', 'board', 'terminals'])
   })
 
   it('crosses a mark in one step', () => {
@@ -116,7 +122,7 @@ describe('moveStep', () => {
   })
 
   it('stops at the ends', () => {
-    expect(moveStep(D, 'terminals', -1, all)).toEqual(D)
+    expect(moveStep(D, 'dashboard', -1, all)).toEqual(D)
     expect(moveStep(D, 'settings', 1, all)).toEqual(D)
     expect(moveStep(D, 'skills', 1, (id) => id !== 'palette' && id !== 'settings')).toEqual(D)
   })
@@ -132,7 +138,7 @@ describe('dropBefore', () => {
     { id: 'settings', mid: 500 },
   ]
   it('lands before the first entry below the pointer', () => {
-    expect(dropBefore(D, entries, 0)).toBe(0)
+    expect(dropBefore(D, entries, 0)).toBe(D.indexOf('terminals'))
     expect(dropBefore(D, entries, 40)).toBe(D.indexOf('prs'))
     expect(dropBefore(D, entries, 90)).toBe(D.indexOf('costs'))
     // Above the spacer's middle: the end of the middle group; below it: the bottom group.

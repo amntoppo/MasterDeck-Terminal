@@ -5,7 +5,7 @@ import type { AppState } from '@shared/types'
 import { formatAgo } from '@shared/format'
 import { deck, useNow } from '../deck'
 import { webConfirm } from '../webConfirm'
-import { can, isWeb, keyPlatform } from '../web'
+import { can, isWeb, keyPlatform, setWebStartView, webStartView, type StartView } from '../web'
 import { AccountPanel, Field } from './AccountPanel'
 import { MeetingsSetup } from './MeetingsSetup'
 import { NotificationsPanel } from './NotificationsPanel'
@@ -90,6 +90,10 @@ export function SettingsView({
   const webTheme = useWebThemePref()
   const theme = isWeb() ? webTheme : s.theme
   const setTheme = (t: ThemePref) => (isWeb() ? setWebThemePref(t) : set('theme', t))
+  // Open on, the same way: the Mac's setting, or this browser's own (web.ts).
+  const [webStart, setWebStart] = useState<StartView>(webStartView)
+  const startView = isWeb() ? webStart : s.startView
+  const setStartView = (v: StartView) => (isWeb() ? (setWebStartView(v), setWebStart(v)) : set('startView', v))
 
   const now = useNow(5_000)
   const r = state.remote
@@ -107,6 +111,15 @@ export function SettingsView({
             {THEME_PREFS.map((t) => (
               <button key={t} role="radio" aria-checked={theme === t} className={theme === t ? 'on' : ''} onClick={() => setTheme(t)}>
                 {t === 'system' ? 'System' : THEMES[t].label}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Open MasterDeck on" hint={isWeb() ? 'For this browser.' : 'The view MasterDeck shows when it starts.'}>
+          <div className="seg" role="radiogroup" aria-label="Open MasterDeck on">
+            {(['last', 'dashboard'] as const).map((v) => (
+              <button key={v} role="radio" aria-checked={startView === v} className={startView === v ? 'on' : ''} onClick={() => setStartView(v)}>
+                {v === 'last' ? 'Last view' : 'Dashboard'}
               </button>
             ))}
           </div>

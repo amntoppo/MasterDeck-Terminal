@@ -9,6 +9,7 @@ export const RAIL_SPACER = 'spacer'
 export const RAIL_MARKS: readonly string[] = [RAIL_SEP, RAIL_SPACER]
 
 export const RAIL_DEFAULT: readonly string[] = [
+  'dashboard',
   'terminals',
   'board',
   'prs',

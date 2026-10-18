@@ -4,7 +4,7 @@ import type { ShortcutId } from '@shared/shortcuts'
 import { DECK_ACCESS } from '@shared/remoteDeck'
 import type { PaletteAction } from './components/CommandPalette'
 import type { View } from './components/Sidebar'
-import { deck } from './deck'
+import { deck, load, save } from './deck'
 
 type Method = keyof DeckApi
 
@@ -39,6 +39,7 @@ export type Screen = View | 'history' | 'broadcast' | 'standup' | 'sprint-summar
  * derives from it, and each screen also needs its methods to be reachable (`can`).
  */
 export const WEB_VIEWS: ReadonlySet<Screen> = new Set<Screen>([
+  'dashboard',
   'terminals',
   'board',
   'prs',
@@ -56,7 +57,16 @@ export const WEB_VIEWS: ReadonlySet<Screen> = new Set<Screen>([
   'notes',
 ])
 
-/** The method a screen cannot work without, if any. */
+/**
+ * Open MasterDeck on (#183), the web app's own choice per browser. The Mac's lives in its settings
+ * (`startView`), which a browser never changes (remoteSettings).
+ */
+export type StartView = 'last' | 'dashboard'
+const START_KEY = 'md.startView'
+export const webStartView = (): StartView => (load<unknown>(START_KEY, 'last') === 'dashboard' ? 'dashboard' : 'last')
+export const setWebStartView = (v: StartView) => save(START_KEY, v)
+
+/** The method a screen cannot work without, if any. Not listed: none (the Dashboard reads the state). */
 const SCREEN_NEEDS: Partial<Record<Screen, Method>> = {
   costs: 'tokensByDay',
   janitor: 'janitor',

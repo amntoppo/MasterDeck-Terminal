@@ -35,6 +35,8 @@ export interface Settings {
   updateChannel: 'stable' | 'beta'
   /** The left rail's icon order (shared/railOrder.ts); empty is the default. */
   railOrder: string[]
+  /** Settings → General → Open MasterDeck on: the last view, or the Dashboard. The web app keeps its own per browser (`md.startView`). */
+  startView: 'last' | 'dashboard'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -57,6 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoDownloadUpdates: true,
   updateChannel: 'stable',
   railOrder: [],
+  startView: 'last',
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -85,5 +88,6 @@ export function normalizeSettings(raw: unknown): Settings {
     autoDownloadUpdates: typeof r.autoDownloadUpdates === 'boolean' ? r.autoDownloadUpdates : DEFAULT_SETTINGS.autoDownloadUpdates,
     updateChannel: r.updateChannel === 'beta' ? 'beta' : 'stable',
     railOrder: cleanRailOrder(r.railOrder),
+    startView: r.startView === 'dashboard' ? 'dashboard' : 'last',
   }
 }
