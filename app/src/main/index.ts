@@ -112,6 +112,19 @@ import {
 import { ModCatalog, ModOff } from "./modOff";
 import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
+import { ActivityLog } from "./activityLog";
+import {
+  ACTIVITY_KEEP_DAYS,
+  ACTIVITY_RANGE_MAX_MS,
+  diffActivity,
+  inboxEvent,
+  meetingEvent,
+  noteEvent,
+  releaseEvents,
+  runEvent,
+  seenReleases,
+  type ActivityEvent,
+} from "@shared/activityLog";
 import { Scheduler } from "./sched";
 import { SCHED_TICK_MS } from "@shared/sched";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
@@ -369,12 +382,50 @@ async function reloadMods(): Promise<CliResult> {
     ? { ok: done > 0, message: `Reloading ${done} of ${idle.length}. ${failed.join("; ")}` }
     : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
 }
+// The Dashboard's activity log (#183): <home>/activity.jsonl, read through activity:list only; never
+// in AppState or the remote snapshot. Fed by the state callback (diffActivity) and the stores' hooks
+// below, each through logActivity, so a failure there never breaks the callback or a store's write.
+/** When this process started: what the state carries from caches read before it is not news. */
+const processStart = Date.now();
+const activity = new ActivityLog(join(paths.home, "activity.jsonl"), {
+  onChange: () => emit(CH.activityChanged),
+});
+function logActivity(what: string, make: () => ActivityEvent | ActivityEvent[] | null): void {
+  try {
+    const e = make();
+    for (const x of Array.isArray(e) ? e : e ? [e] : []) activity.add(x);
+  } catch (err) {
+    console.error(`activity: ${what}: ${String((err as Error)?.message ?? err).slice(0, 200)}`);
+  }
+}
+/** The release lines already logged (subjects), read from the log once, so a restart does not repeat them. */
+let releasesSeen: Set<string> | null = null;
+function logRelease(s: UpdateState): void {
+  logActivity("release", () => {
+    if (!releasesSeen) {
+      // ponytail: list() answers at most 1000 events, so the log is read a day at a time; a day of
+      // more than 1000 events could hide a release line, which would then be logged once more.
+      // Upgrade: a query by type on ActivityLog.
+      const now = Date.now();
+      const all: ActivityEvent[] = [];
+      for (let d = 0; d <= ACTIVITY_KEEP_DAYS; d++)
+        all.push(...activity.list(now - (d + 1) * 86_400_000, d === 0 ? Number.MAX_SAFE_INTEGER : now - d * 86_400_000));
+      releasesSeen = seenReleases(all);
+    }
+    return releaseEvents(s, releasesSeen, Date.now());
+  });
+}
+
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's NoteMeta: its title, 120-character preview, ticket, `link` (the
 // session's key and name, a ticket) and `meeting` (id, title, time), to the window and to web tabs
 // that subscribed; never the text). Sessions may add to them (pumpNoteRequests) but never read them.
+// The activity log gets "a note was added" and the note's id only (noteEvent).
 const notes = new NotesStore(join(paths.home, "notes"), {
-  onChange: (c) => emit(CH.notesChanged, c),
+  onChange: (c) => {
+    emit(CH.notesChanged, c);
+    logActivity("note", () => noteEvent(c, Date.now()));
+  },
   repoOf: (repo) => fullRepo(repo),
 });
 // Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
@@ -408,6 +459,7 @@ const scheduler = new Scheduler(join(paths.home, "schedules.json"), {
     emit(CH.schedChanged);
     sources.changed();
   },
+  onRun: (r) => logActivity("schedule", () => runEvent(r, Date.now())),
 });
 const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
 const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
@@ -1164,6 +1216,7 @@ const sources = new Sources(
       console.error(`remote sync: ${String(e)}`);
     }
     notify(diffEvents(prev, state, focused));
+    logActivity("state", () => diffActivity(prev, state, Date.now(), processStart));
     // Dock badge: the Needs-you count.
     if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length);
     else if (prev?.settings.dockBadge) app.setBadgeCount(0);
@@ -1357,8 +1410,10 @@ function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
 }
 
 // Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
+// A resolution is logged (not a dismissed one); the inbox resolves nothing while it is silent.
 sources.inbox.on("event", (e) => {
   if (e.type === "added") notifyItem(e.entry);
+  else if (e.type === "resolved") logActivity("inbox", () => inboxEvent(e.entry, Date.now()));
 });
 
 /** Answer the menu on a session's screen, if it is still the question the user saw. */
@@ -2846,6 +2901,17 @@ function registerIpc(): void {
   });
   // Schedules (#140). The web asked with webConfirm before a delete; the window asks here.
   reg.handle(CH.schedList, () => scheduler.list());
+  // The Dashboard's Timeline (#183): two finite times, since ≤ until, at most 31 days apart; else [].
+  reg.handle(CH.activityList, (_e, since: unknown, until: unknown) =>
+    typeof since === "number" &&
+    typeof until === "number" &&
+    Number.isFinite(since) &&
+    Number.isFinite(until) &&
+    since <= until &&
+    until - since <= ACTIVITY_RANGE_MAX_MS
+      ? activity.list(since, until)
+      : [],
+  );
   reg.handle(CH.schedSave, (_e, input: unknown) => scheduler.save(input));
   reg.handle(CH.schedEnable, (_e, id: unknown, on: unknown) =>
     typeof id === "string" ? scheduler.enable(id, on === true) : { ok: false, message: "no schedule" },
@@ -4264,6 +4330,7 @@ function makeUpdater(): Updater {
     win?.webContents.send(CH.updateChanged, s);
     setAppMenu(s);
     announceUpdate(s);
+    logRelease(s);
   });
   return u;
 }
@@ -4407,6 +4474,7 @@ const confirmStopRecording = oneAtATime(async (parent: BrowserWindow | null, the
 // nothing at startup asks macOS for the microphone or the screen (spec §1, meetingsStartup.test.ts).
 const meetings = new MeetingsIpc({
   platform: process.platform,
+  onMeetingEnded: (m) => logActivity("meeting", () => meetingEvent(m, Date.now())),
   meetings: () => sources.getSettings().meetings,
   setMeetings: (m) => {
     sources.setSettings({ ...sources.getSettings(), meetings: m });
@@ -4691,6 +4759,7 @@ app.whenReady().then(async () => {
   claudeBin = await resolveClaude(env());
   updater = makeUpdater();
   setAppMenu(updater.state());
+  logRelease(updater.state());
   registerIpc();
   // masterdeck-media://meeting/<id>/audio → that meeting's audio.webm, nothing else. The window's
   // session only: the capture window's partition has no such scheme, and the web bridge never relays it.

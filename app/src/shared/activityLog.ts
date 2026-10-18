@@ -1,6 +1,11 @@
 import { asTicket, fullRepo, ticketKey, ticketLabel, type Ticket } from './ticket'
+import type { InboxEntry } from './inbox'
+import type { Meeting } from './meetings'
+import type { NoteChange } from './notes'
+import type { SchedRun } from './sched'
 import type { TeamPr } from './teamPrs'
 import type { AppState, Session } from './types'
+import type { UpdateState } from './updates'
 
 /**
  * The Dashboard's activity log (#183): what happened, worked out by comparing two states, plus the
@@ -336,4 +341,95 @@ export function cleanEvent(raw: unknown): ActivityEvent | null {
   const target = cleanTarget(o.target)
   if (target) e.target = target
   return e
+}
+
+// The stores' events (main wires each one, in try/catch). Each mapper is pure, for its test.
+
+/** A schedule's run that ended: "Nightly triage ran", "Nightly triage failed: reason". Null while it runs. */
+export function runEvent(r: SchedRun, now: number, ids: () => string = newId(now)): ActivityEvent | null {
+  if (r.status === 'running') return null
+  const how = r.status === 'done' ? 'ran' : r.status
+  const reason = r.status !== 'done' && r.reason ? `: ${r.reason}` : ''
+  const e: ActivityEvent = { id: ids(), at: now, type: 'schedule-run', title: `${r.scheduleName} ${how}${reason}`, subject: `run:${r.id}`, target: { schedules: true } }
+  if (r.sessionName) e.detail = r.sessionName
+  return e
+}
+
+/** A meeting whose recording ended: "Meeting recorded: Standup (42 min)", or with no title yet "A meeting was recorded (42 min)". */
+export function meetingEvent(m: Pick<Meeting, 'id' | 'title' | 'started' | 'ended' | 'pausedMs'>, now: number, ids: () => string = newId(now)): ActivityEvent | null {
+  if (m.ended === null) return null
+  const min = Math.max(1, Math.round((m.ended - m.started - (m.pausedMs || 0)) / 60_000))
+  const title = m.title.trim()
+  return {
+    id: ids(),
+    at: now,
+    type: 'meeting',
+    title: title ? `Meeting recorded: ${title} (${min} min)` : `A meeting was recorded (${min} min)`,
+    subject: `meeting:${m.id}`,
+    target: { meeting: m.id },
+  }
+}
+
+/**
+ * A note that did not exist before: "A note was added", or "A note was added to #42". Notes are
+ * private: the event carries the note's id and a ticket's number, never its title, preview or
+ * text. A meeting's notes are left out (the meeting's own event says it was recorded).
+ */
+export function noteEvent(c: NoteChange, now: number, ids: () => string = newId(now)): ActivityEvent | null {
+  if (!('meta' in c) || !c.created || c.meta.meeting) return null
+  const t = c.meta.ticket
+  const e: ActivityEvent = {
+    id: ids(),
+    at: now,
+    type: 'note-added',
+    title: t ? `A note was added to ${ticketLabel(t.repo, t.number)}` : 'A note was added',
+    subject: `note:${c.id}`,
+    target: { note: c.id },
+  }
+  if (t?.repo) e.repo = t.repo
+  return e
+}
+
+/** A Needs-you item that closed: its title, and how (an answer, or what changed). Not a dismissed one. */
+export function inboxEvent(entry: InboxEntry, now: number, ids: () => string = newId(now)): ActivityEvent | null {
+  const how = entry.resolvedHow ?? null
+  if (entry.state !== 'resolved' || how === 'dismissed') return null
+  const item = entry.item
+  const e: ActivityEvent = { id: ids(), at: now, type: 'needs-you-answered', title: item.title || 'A Needs-you item closed', subject: `inbox:${item.id}` }
+  if (how) e.detail = how
+  const repo = item.ticket ? fullRepo(item.ticket.repo) : ''
+  if (repo) e.repo = repo
+  if (item.sessionKey) e.target = { session: item.sessionKey }
+  else if (item.ticket) e.target = { ticket: { repo: item.ticket.repo ?? null, number: item.ticket.number } }
+  return e
+}
+
+/** The release events already in a log (their subjects), so a restart does not log them again. */
+export function seenReleases(events: ActivityEvent[]): Set<string> {
+  return new Set(events.filter((e) => e.type === 'release').map((e) => e.subject))
+}
+
+/**
+ * What the updater's state says that the log does not have yet: "Updated to x (from y)" once per
+ * version, "MasterDeck x is available" once per offered version. Adds what it returns to `seen`.
+ */
+export function releaseEvents(s: Pick<UpdateState, 'current' | 'offer' | 'updatedFrom'>, seen: Set<string>, now: number, ids: () => string = newId(now)): ActivityEvent[] {
+  const out: ActivityEvent[] = []
+  if (s.updatedFrom) {
+    const subject = `release:updated:${s.current}`
+    if (!seen.has(subject)) {
+      seen.add(subject)
+      const at = Number.isFinite(s.updatedFrom.at) && s.updatedFrom.at <= now ? s.updatedFrom.at : now
+      out.push({ id: ids(), at, type: 'release', title: `Updated to ${s.current} (from ${s.updatedFrom.from})`, subject })
+    }
+  }
+  // Any phase with an offer: an automatic download may go from checking to downloading directly.
+  if (s.offer && s.offer.version !== s.current) {
+    const subject = `release:offer:${s.offer.version}`
+    if (!seen.has(subject)) {
+      seen.add(subject)
+      out.push({ id: ids(), at: now, type: 'release', title: `MasterDeck ${s.offer.version} is available`, subject })
+    }
+  }
+  return out
 }

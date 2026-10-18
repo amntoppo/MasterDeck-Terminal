@@ -63,6 +63,8 @@ export class MeetingStore {
   constructor(
     readonly dir: string,
     private now: () => number = Date.now,
+    /** Once, when a stored meeting's recording ends (`ended` set): the Dashboard's activity log. */
+    private onEnded?: (m: Meeting) => void,
   ) {}
 
   private file(id: string): string {
@@ -155,7 +157,14 @@ export class MeetingStore {
     const next = storedMeeting(JSON.parse(JSON.stringify({ ...change(old), id: old.id })), old.id)
     if (!next) return { ok: false, message: 'Not a meeting.' }
     const w = this.write(next)
-    return w.ok ? { ok: true, meeting: next } : w
+    if (!w.ok) return w
+    if (old.ended === null && next.ended !== null && this.onEnded)
+      try {
+        this.onEnded(next)
+      } catch (e) {
+        console.error(`meetings: onEnded: ${String(e)}`)
+      }
+    return { ok: true, meeting: next }
   }
 
   /** Where a chunk goes; null for a bad id, track or sequence number. */

@@ -27,6 +27,7 @@ import type { SetupWindowRequest } from "./setupClaude";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
 import type { SchedInput, SchedList } from "./sched";
+import type { ActivityEvent } from "./activityLog";
 import type { ChangeList, DiffRead, FileList, FileRead } from "./sessionFiles";
 import type { DiffBase } from "./sessionTabs";
 import type { HookEntry } from "./workflow";
@@ -256,6 +257,8 @@ export const CH = {
   schedEnable: "sched:enable",
   schedRunNow: "sched:runNow",
   schedChanged: "sched:changed",
+  activityList: "activity:list",
+  activityChanged: "activity:changed",
   showSchedules: "app:showSchedules",
   meetingsSetup: "meetings:setup",
   meetingsConsent: "meetings:consent",
@@ -530,6 +533,10 @@ export interface DeckApi {
   schedRunNow(id: string): Promise<{ ok: boolean; message: string }>;
   /** A schedule or run changed: list again. */
   onSchedChanged(cb: () => void): () => void;
+  /** The Dashboard's activity log (#183): events with since ≤ at ≤ until, newest first; [] for a bad or over-31-day range. */
+  activityList(since: number, until: number): Promise<ActivityEvent[]>;
+  /** The activity log changed (at most every 2 s): list again. */
+  onActivityChanged(cb: () => void): () => void;
   /** A schedule's notification without a session was clicked: show Schedules. */
   onShowSchedules(cb: () => void): () => void;
   /**

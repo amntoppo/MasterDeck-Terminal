@@ -10,10 +10,19 @@ import {
   coalesce,
   diffActivity,
   filterActivity,
+  inboxEvent,
+  meetingEvent,
+  noteEvent,
+  releaseEvents,
+  runEvent,
+  seenReleases,
   type ActivityEvent,
 } from './activityLog'
 import type { AppState, BoardCard, GitInfo, Session } from './types'
 import type { TeamPr } from './teamPrs'
+import type { SchedRun } from './sched'
+import type { InboxEntry } from './inbox'
+import type { NoteMeta } from './notes'
 
 const NOW = new Date(2026, 9, 18, 15, 0).getTime()
 const HOUR = 3_600_000
@@ -308,5 +317,65 @@ describe('cleanEvent', () => {
     const e = cleanEvent({ ...good, account: 5, repo: '' })!
     expect(e.account).toBeUndefined()
     expect(e.repo).toBeUndefined()
+  })
+})
+
+describe("the stores' events", () => {
+  const run = (o: Partial<SchedRun> = {}): SchedRun => ({
+    id: 'r1', scheduleId: 's1', scheduleName: 'Nightly triage', slot: null, trigger: 'schedule', status: 'done', startedAt: NOW - HOUR, endedAt: NOW,
+    sessionName: 'nightly-triage-1018-0300', bgId: 'bg1', sessionId: null, seenWorking: true, seen: true, costUsd: 0, ...o,
+  })
+  it('runEvent: ran, failed with its reason, nothing while running', () => {
+    expect(runEvent(run(), NOW, ids)).toMatchObject({ type: 'schedule-run', at: NOW, title: 'Nightly triage ran', detail: 'nightly-triage-1018-0300', subject: 'run:r1', target: { schedules: true } })
+    expect(runEvent(run({ status: 'failed', reason: 'Workspace not trusted' }), NOW, ids)!.title).toBe('Nightly triage failed: Workspace not trusted')
+    expect(runEvent(run({ status: 'skipped', reason: 'the previous run is still going', sessionName: '' }), NOW, ids)).not.toHaveProperty('detail')
+    expect(runEvent(run({ status: 'running' }), NOW, ids)).toBeNull()
+  })
+
+  it('meetingEvent: the title and the time recorded, less the pauses', () => {
+    const m = { id: 'm-1', title: 'Standup', started: NOW - 50 * 60_000, ended: NOW, pausedMs: 8 * 60_000 }
+    expect(meetingEvent(m, NOW, ids)).toMatchObject({ type: 'meeting', title: 'Meeting recorded: Standup (42 min)', subject: 'meeting:m-1', target: { meeting: 'm-1' } })
+    expect(meetingEvent({ ...m, title: ' ' }, NOW, ids)!.title).toBe('A meeting was recorded (42 min)')
+    expect(meetingEvent({ ...m, ended: null }, NOW, ids)).toBeNull()
+  })
+
+  it('noteEvent: a new note only, and nothing of its title, preview or text', () => {
+    const meta: NoteMeta = { id: 'n-1', title: 'Secret plan', preview: 'the private words', ticket: null, created: 1, updated: 1 }
+    const e = noteEvent({ id: 'n-1', meta, created: true }, NOW, ids)!
+    expect(e).toMatchObject({ type: 'note-added', title: 'A note was added', subject: 'note:n-1', target: { note: 'n-1' } })
+    const ticket = noteEvent({ id: 't-acme~web~42', meta: { ...meta, id: 't-acme~web~42', title: '', ticket: { repo: 'acme/web', number: 42 } }, created: true }, NOW, ids)!
+    expect(ticket).toMatchObject({ title: 'A note was added to web#42', repo: 'acme/web' })
+    for (const ev of [e, ticket]) {
+      const all = JSON.stringify(ev)
+      expect(all).not.toContain('Secret')
+      expect(all).not.toContain('private')
+    }
+    expect(noteEvent({ id: 'n-1', meta }, NOW, ids)).toBeNull()
+    expect(noteEvent({ id: 'n-1', deleted: true }, NOW, ids)).toBeNull()
+    expect(noteEvent({ id: 'n-2', meta: { ...meta, meeting: { id: 'm-1', title: 'Standup', at: 1 } }, created: true }, NOW, ids)).toBeNull()
+  })
+
+  it('inboxEvent: the title and how; not dismissed', () => {
+    const entry = (o: Partial<InboxEntry> = {}, item: object = {}): InboxEntry =>
+      ({ item: { id: 'ask:a', kind: 'ask', priority: 1, sessionKey: 'a', ticket: null, title: 'api-auth asks which token store', body: '', actions: [], detail: {}, ...item }, state: 'resolved', firstSeen: 0, lastSeen: 0, resolvedHow: 'answered in the session', ...o }) as InboxEntry
+    expect(inboxEvent(entry(), NOW, ids)).toMatchObject({ type: 'needs-you-answered', title: 'api-auth asks which token store', detail: 'answered in the session', subject: 'inbox:ask:a', target: { session: 'a' } })
+    expect(inboxEvent(entry({}, { sessionKey: null, ticket: { repo: 'acme/api', number: 7 } }), NOW, ids)).toMatchObject({ repo: 'acme/api', target: { ticket: { repo: 'acme/api', number: 7 } } })
+    expect(inboxEvent(entry({ resolvedHow: 'dismissed' }), NOW, ids)).toBeNull()
+    expect(inboxEvent(entry({ state: 'open' }), NOW, ids)).toBeNull()
+  })
+
+  it('releaseEvents: once per version, also after a restart', () => {
+    const seen = new Set<string>()
+    const st = { current: '0.9.0', updatedFrom: { from: '0.8.2', at: NOW - 5000 } }
+    const first = releaseEvents(st, seen, NOW, ids)
+    expect(first).toMatchObject([{ type: 'release', at: NOW - 5000, title: 'Updated to 0.9.0 (from 0.8.2)', subject: 'release:updated:0.9.0' }])
+    expect(releaseEvents(st, seen, NOW, ids)).toEqual([])
+    const offer = { version: '0.9.1' } as never
+    expect(releaseEvents({ current: '0.9.0', offer }, seen, NOW, ids)).toMatchObject([{ title: 'MasterDeck 0.9.1 is available', subject: 'release:offer:0.9.1' }])
+    expect(releaseEvents({ current: '0.9.0', offer }, seen, NOW, ids)).toEqual([])
+    // A restart: the seen versions come from the log.
+    const again = seenReleases([...first, { id: 'x', at: NOW, type: 'release', title: 'MasterDeck 0.9.1 is available', subject: 'release:offer:0.9.1' }])
+    expect(releaseEvents({ ...st, offer }, again, NOW, ids)).toEqual([])
+    expect(releaseEvents({ current: '0.9.1', offer: { version: '0.9.1' } as never }, new Set(), NOW, ids)).toEqual([])
   })
 })

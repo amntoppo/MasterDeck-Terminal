@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Scheduler, type SchedDeps, type SchedStart, type SchedState } from './sched'
 import type { Session } from '@shared/types'
+import type { SchedRun } from '@shared/sched'
 
 const utc = (s: string) => Date.parse(`${s}Z`)
 const M = 60_000
@@ -40,6 +41,7 @@ function harness(o: Partial<SchedDeps> = {}) {
     notes: [] as { title: string; body: string; sessionKey: string | null }[],
     startResult: null as null | { ok: false; message: string },
     changes: 0,
+    ran: [] as SchedRun[],
   }
   let n = 0
   const d: SchedDeps = {
@@ -59,6 +61,7 @@ function harness(o: Partial<SchedDeps> = {}) {
     templateName: (id) => (id === 'md-ci-doctor' ? 'CI doctor' : null),
     dirOk: () => true,
     onChange: () => h.changes++,
+    onRun: (r) => h.ran.push(r),
     ...o,
   }
   return { h, s: () => new Scheduler(file, d) }
@@ -177,6 +180,42 @@ describe('Scheduler', () => {
     expect(h.notes[0]).toMatchObject({ title: 'Morning triage: failed', body: 'Workspace not trusted' })
   })
 
+  it('onRun: once per run, when it ends (done, failed, skipped, stopped)', async () => {
+    const { h, s } = harness()
+    const a = s()
+    await a.save(input({ when: { kind: 'hours', every: 1, minute: 0 } }))
+    h.now = utc('2026-10-17T09:00:10')
+    await a.tick()
+    expect(h.ran).toEqual([])
+    const sess = session({ key: 'bg000001', bgId: 'bg000001', sessionId: 'sid-1', startedAt: h.now })
+    h.state = { sessions: [sess], costBook: {}, allStats: {} }
+    h.now = utc('2026-10-17T10:00:10')
+    await a.tick()
+    expect(h.ran.map((r) => r.status)).toEqual(['skipped'])
+    h.state = { ...h.state, sessions: [{ ...sess, state: 'idle' }] }
+    h.now += 11 * M
+    await a.tick()
+    await a.tick()
+    expect(h.ran.map((r) => r.status)).toEqual(['skipped', 'done'])
+    h.startResult = { ok: false, message: 'Workspace not trusted' }
+    await a.runNow(a.list().schedules[0].id)
+    expect(h.ran.map((r) => r.status)).toEqual(['skipped', 'done', 'failed'])
+    expect(h.ran[2]).toMatchObject({ scheduleName: 'Morning triage', reason: 'Workspace not trusted' })
+  })
+
+  it('a throwing onRun breaks nothing', async () => {
+    const { h, s } = harness({
+      onRun: () => {
+        throw new Error('boom')
+      },
+    })
+    const a = s()
+    await a.save(input())
+    h.startResult = { ok: false, message: 'nope' }
+    expect(await a.runNow(a.list().schedules[0].id)).toEqual({ ok: false, message: 'nope' })
+    expect(s().list().runs[0]).toMatchObject({ status: 'failed' })
+  })
+
   it('a missing workflow fails without starting', async () => {
     const { h, s } = harness()
     const a = s()
@@ -197,6 +236,7 @@ describe('Scheduler', () => {
     expect(h.stops).toEqual(['bg000001'])
     expect(a.list().runs[0]).toMatchObject({ status: 'stopped', costUsd: 1.5, reason: expect.stringMatching(/cost limit \(\$1\.00\)/) })
     expect(h.notes[0].title).toBe('Morning triage: stopped')
+    expect(h.ran.map((r) => r.status)).toEqual(['stopped'])
   })
 
   it('a failed stop keeps the run running and tries again', async () => {

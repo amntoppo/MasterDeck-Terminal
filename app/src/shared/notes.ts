@@ -84,7 +84,8 @@ export type SaveResult =
   | { ok: false; conflict: true; note: Note | null }
   /** `retry`: the disk failed, not the note; the same save may work in a moment. Anything else is final for this text. */
   | { ok: false; message: string; retry?: true }
-export type NoteChange = { id: string; meta: NoteMeta } | { id: string; deleted: true }
+/** `created`: the note did not exist before this write (the Dashboard's activity log). */
+export type NoteChange = { id: string; meta: NoteMeta; created?: true } | { id: string; deleted: true }
 
 /** The two id shapes, and so the only file names the store ever builds. `~` is in no GitHub owner or repository name. */
 export const NOTE_ID = /^(?:n-[0-9a-f]{32}|t-[a-z0-9-]{1,39}~[a-z0-9._-]{1,100}~[1-9][0-9]{0,8})$/

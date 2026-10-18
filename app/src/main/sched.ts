@@ -51,6 +51,8 @@ export interface SchedDeps {
   templateName: (id: string) => string | null
   dirOk: (p: string) => boolean
   onChange: () => void
+  /** Once per run, when it ends: done, failed, skipped or stopped (the Dashboard's activity log). */
+  onRun?: (r: SchedRun) => void
 }
 
 /** Session keys of runs this recent carry the schedule's chip in the session list. */
@@ -223,7 +225,10 @@ export class Scheduler {
       if (!Object.keys(upd).length) continue
       Object.assign(r, upd)
       changed = true
-      if (live && r.status !== 'running') this.tell(r, sched ?? null)
+      if (live && r.status !== 'running') {
+        this.tell(r, sched ?? null)
+        this.ran(r)
+      }
     }
     if (changed) this.write()
   }
@@ -274,7 +279,10 @@ export class Scheduler {
     if (res.ok) r.bgId = res.bgId
     else Object.assign(r, { status: 'failed', endedAt: this.d.now(), reason: res.message.slice(0, 300) || 'it did not start' })
     this.write()
-    if (!res.ok) this.tell(r, s)
+    if (!res.ok) {
+      this.tell(r, s)
+      this.ran(r)
+    }
     return r
   }
 
@@ -301,6 +309,17 @@ export class Scheduler {
 
   private addRun(r: SchedRun): void {
     this.data.runs = withRun(this.data.runs, r)
+    // A skip is added already ended; a run that starts is told when it ends (follow, startRun).
+    if (r.status !== 'running') this.ran(r)
+  }
+
+  private ran(r: SchedRun): void {
+    if (!this.d.onRun) return
+    try {
+      this.d.onRun({ ...r })
+    } catch (e) {
+      console.error('schedules: onRun failed', e)
+    }
   }
 
   private patch(id: string, p: Partial<Schedule>): void {
