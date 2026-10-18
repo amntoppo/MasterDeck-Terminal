@@ -56,8 +56,9 @@ open /Applications/MasterDeck.app
 **Every merge to `main` that changes the app is released automatically** (issue #166, below:
 "Automatic release on every merge"): a patch version, a GitHub release and the in-app update, with
 no manual step. A release by hand is for a minor or major version, a beta, or a release of a
-commit the automatic one skipped. Only when the user asks. Last release by hand: v0.9.0
-(2026-10-10). Before it: v0.8.2 (2026-10-06; v0.8.0 and v0.8.1 had no Windows build).
+commit the automatic one skipped. Only when the user asks. Last release by hand: v0.9.1
+(2026-10-18). Before it: v0.9.0 (2026-10-10), v0.8.2 (2026-10-06; v0.8.0 and v0.8.1 had no
+Windows build).
 
 A minor or major version needs no tag of its own: set it in `app/package.json` (`npm version
 0.10.0 --no-git-tag-version`, with an optional `.github/releases/v0.10.0.md`) in a PR, and the
