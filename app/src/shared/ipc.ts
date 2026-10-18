@@ -296,6 +296,9 @@ export const CH = {
   ticketBuilderPrepare: "ticket:builderPrepare",
   prReviewPrepare: "pr:reviewPrepare",
   autoReviewSet: "pr:autoReviewSet",
+  reviewBatchAdd: "pr:reviewBatchAdd",
+  reviewBatchCancel: "pr:reviewBatchCancel",
+  reviewBatchRetry: "pr:reviewBatchRetry",
   prWatchSet: "prWatch:set",
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
@@ -644,6 +647,20 @@ export interface DeckApi {
     tabId: string,
     sw: { review: boolean; merge: boolean; name: string; account?: string; filters: PrReviewRequest["filters"]; forget?: boolean; follow?: boolean },
   ): Promise<CliResult>;
+  /**
+   * Review selected (#176): the ticked PRs join the tab's batch (looked up in MasterDeck's own list,
+   * written beside the guard for the post script). `prompt`: the line to type into the tab's session.
+   */
+  reviewBatchAdd(req: {
+    tabId: string;
+    urls: string[];
+    /** The tab's account (two or more accounts). */
+    account?: string;
+  }): Promise<CliResult & { prompt?: string }>;
+  /** Cancel batch: no more posts for what is not posted yet; `forget`: the tab was closed (the window only). */
+  reviewBatchCancel(tabId: string, forget?: boolean): Promise<CliResult>;
+  /** Retry one PR of the batch (failed, skipped or cancelled); `prompt`: the line to type. */
+  reviewBatchRetry(tabId: string, url: string): Promise<CliResult & { prompt?: string }>;
   /**
    * Watch a PR, or stop watching it (#182), for a PR tab, as its account. `pr`: a link,
    * `owner/repo#123`, or `#123` / `123` in the tab's primary repository (its Repo filter `repo`,

@@ -33,6 +33,15 @@ export const prReviewTurn = (guard: string): string => guard.replace(/\.json$/, 
 export const prReviewAuto = (guard: string): string => guard.replace(/\.json$/, '.auto.json')
 
 /**
+ * The tab's batch (Review selected, #176), written by main only, outside the folder: `[{url, id}]`
+ * of the PRs the post script may still post to (its `--batch` form, and the asked form).
+ */
+export const prReviewBatchFile = (guard: string): string => guard.replace(/\.json$/, '.batch.json')
+
+/** What the post script did for each batch PR, one JSON line each (`shared/reviewBatch.ts` parseLogLines); main reads it. */
+export const prReviewBatchLog = (guard: string): string => guard.replace(/\.json$/, '.batch-log.jsonl')
+
+/**
  * The tab's post script, beside its guard. Never in the session's folder: there acceptEdits lets
  * the session rewrite files without asking (cp, sed…), and the script is what the user approves.
  */
@@ -113,7 +122,8 @@ export function prReviewDirs(home: string): string[] {
 
 /**
  * The project settings: reading PRs without asking; the post script is asked for each time, but for
- * `--auto` (Automate Review's PRs only, checked by the script); other writes blocked.
+ * `--auto` and `--batch` (Automate Review's and Review selected's PRs only, checked by the script);
+ * other writes blocked.
  */
 export const PR_REVIEW_SETTINGS = {
   permissions: {
@@ -155,8 +165,9 @@ export function prReviewSettings(turn: string, post: string): object {
   const any = (v: string) => [{ matcher: '*', hooks: put(v)[0].hooks }]
   return {
     ...PR_REVIEW_SETTINGS,
-    // Automate Review's form runs unasked: the script posts only a comment, only to what MasterDeck queued.
-    permissions: { ...PR_REVIEW_SETTINGS.permissions, allow: [`Bash(${post} --auto:*)`, ...PR_REVIEW_SETTINGS.permissions.allow] },
+    // Automate Review's and Review selected's forms run unasked: the script posts only a comment,
+    // only to what MasterDeck queued or the user ticked.
+    permissions: { ...PR_REVIEW_SETTINGS.permissions, allow: [`Bash(${post} --auto:*)`, `Bash(${post} --batch:*)`, ...PR_REVIEW_SETTINGS.permissions.allow] },
     hooks: { SessionStart: put('start'), Stop: put('idle'), UserPromptSubmit: put('busy'), PreToolUse: any('busy'), PostToolUse: any('busy') },
   }
 }
@@ -207,6 +218,12 @@ export function writePrReviewAuto(guard: string, urls: string[]): void {
   atomic(prReviewAuto(guard), JSON.stringify(urls) + '\n')
 }
 
+/** The tab's batch file (see prReviewBatchFile). */
+export function writePrReviewBatch(guard: string, entries: { url: string; id: string }[]): void {
+  mkdirSync(dirname(guard), { recursive: true })
+  atomic(prReviewBatchFile(guard), JSON.stringify(entries) + '\n')
+}
+
 /** Only the context changed (another PR picked, the filters): the rest stays as written. */
 export function writePrReviewContext(dir: string, ctx: PrReviewContext, guard: string): void {
   mkdirSync(dir, { recursive: true })
@@ -215,25 +232,43 @@ export function writePrReviewContext(dir: string, ctx: PrReviewContext, guard: s
 }
 
 /**
- * The review session's one write to GitHub: one review on the PR selected in MasterDeck (and no
- * other), as the tab's account, from files inside the folder `dir`. It and both checks' `guard` sit
- * outside that folder (prReviewPost). Runs gh directly (the session's environment carries the tab's account). macOS bash 3.2;
- * jq is one of MasterDeck's tools.
+ * Only the batch changed: context.json's `batch` replaced, the rest kept. Never the guard (what the
+ * session may have written into the file never reaches what the script trusts). No context yet: nothing.
+ */
+export function writePrReviewContextBatch(dir: string, batch: PrReviewContext['batch']): void {
+  let ctx: Record<string, unknown>
+  try {
+    ctx = JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8'))
+  } catch {
+    return
+  }
+  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return
+  atomic(join(dir, 'context.json'), JSON.stringify({ ...ctx, batch: batch ?? [] }, null, 2) + '\n')
+}
+
+/**
+ * The review session's one write to GitHub: one review on the PR selected in MasterDeck, or on a PR
+ * of the tab's batch (and no other), as the tab's account, from files inside the folder `dir`. It and
+ * the files it checks against (`guard`, the queue, the batch) sit outside that folder (prReviewPost).
+ * `--auto` (Automate Review) and `--batch` (Review selected) run unasked: a comment review only, to a
+ * PR MasterDeck queued or the user ticked; `--batch` posts once per batch entry and logs each step
+ * (prReviewBatchLog). Runs gh directly (the session's environment carries the tab's account). macOS
+ * bash 3.2; jq is one of MasterDeck's tools.
  */
 export function prReviewScript(dir: string, guard: string): string {
-  const d = dir.replace(/'/g, `'\\''`)
-  const g = guard.replace(/'/g, `'\\''`)
-  const q = prReviewAuto(guard).replace(/'/g, `'\\''`)
+  const esc = (p: string) => p.replace(/'/g, `'\\''`)
   return `#!/usr/bin/env bash
-# Written by MasterDeck: post one review on the PR selected in the Pull requests view.
-d='${d}'
-g='${g}'
-q='${q}'
+# Written by MasterDeck: post one review on the PR selected in the Pull requests view, or on a PR of its batch.
+d='${esc(dir)}'
+g='${esc(guard)}'
+q='${esc(prReviewAuto(guard))}'
+b='${esc(prReviewBatchFile(guard))}'
+l='${esc(prReviewBatchLog(guard))}'
 out() { printf '%s\\n' "$1"; }
 err() { jq -cn --arg e "$1" '{ok: false, error: $e}'; exit 1; }
-usage() { err 'usage: post-review.sh [--auto] --pr <url> --event comment|approve|request-changes --body-file <file> [--comments-file <file.json>] [--dry-run]'; }
+usage() { err 'usage: post-review.sh [--auto | --batch] --pr <url> --event comment|approve|request-changes --body-file <file> [--comments-file <file.json>] [--dry-run]; post-review.sh --batch (--start | --skip <why> | --fail <why>) --pr <url>'; }
 command -v jq >/dev/null 2>&1 || { out '{"ok":false,"error":"jq is not installed"}'; exit 1; }
-pr=''; event=''; body=''; comments=''; dry=''; auto=''
+pr=''; event=''; body=''; comments=''; dry=''; auto=''; batch=''; mark=''; why=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --pr) pr="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
@@ -242,12 +277,43 @@ while [ $# -gt 0 ]; do
     --comments-file) comments="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
     --dry-run) dry=1; shift ;;
     --auto) auto=1; shift ;;
+    --batch) batch=1; shift ;;
+    --start) [ -z "$mark" ] || usage; mark=reviewing; shift ;;
+    --skip) [ -z "$mark" ] || usage; mark=skipped; why="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
+    --fail) [ -z "$mark" ] || usage; mark=failed; why="\${2:-}"; [ $# -ge 2 ] || usage; shift 2 ;;
     *) usage ;;
   esac
 done
-# Automate Review: a comment review, only on a PR MasterDeck queued for it.
-if [ -n "$auto" ]; then
-  [ -z "$event" ] || [ "$event" = comment ] || err 'an automated review is a comment: it never approves or requests changes'
+[ -z "$auto" ] || [ -z "$batch" ] || usage
+[ -z "$mark" ] || [ -n "$batch" ] || usage
+# The batch entry (its id) a PR has, if MasterDeck still lets it be posted.
+entry() { jq -r --arg pr "$1" 'if type == "array" then (map(select(.url == $pr)) | .[0].id // empty) else empty end' "$b" 2>/dev/null; }
+# A review of this entry was already posted.
+posted() { [ -f "$l" ] && jq -R -s -e --arg id "$1" 'split("\\n") | map(fromjson? // empty) | any(.[]; .id == $id and .status == "posted")' "$l" >/dev/null 2>&1; }
+# One line for MasterDeck: what happened to a batch PR.
+logline() {
+  [ -n "$bid" ] || return 0
+  jq -cn --arg id "$bid" --arg url "$pr" --arg st "$1" --arg note "\${2:-}" --arg rev "\${3:-}" --argjson c "\${4:-0}" \\
+    '{at: (now | floor), id: $id, url: $url, status: $st} + (if $note != "" then {note: $note} else {} end) + (if $rev != "" then {review: $rev, comments: $c} else {} end)' >> "$l"
+}
+# A refusal after the batch PR was taken: its claim let go, logged as failed, then said.
+claim=''
+fail() { [ -z "$claim" ] || rmdir "$claim" 2>/dev/null; [ -n "$dry" ] || logline failed "$1"; err "$1"; }
+bid=''
+if [ -n "$batch" ]; then
+  [ -n "$pr" ] || usage
+  bid="$(entry "$pr")"
+  [ -n "$bid" ] || err "refusing: $pr is not in the batch MasterDeck holds (not ticked, or cancelled); ask the user"
+  posted "$bid" && err "refusing: a review of $pr was already posted for this batch"
+  if [ -n "$mark" ]; then
+    logline "$mark" "$why"
+    jq -cn --arg pr "$pr" --arg st "$mark" '{ok: true, pr: $pr, status: $st}'
+    exit 0
+  fi
+fi
+# Automate Review and Review selected: a comment review, only on a PR MasterDeck queued or the user ticked.
+if [ -n "$auto" ] || [ -n "$batch" ]; then
+  [ -z "$event" ] || [ "$event" = comment ] || err 'an automated or batch review is a comment: it never approves or requests changes'
   event=comment
 fi
 [ -n "$pr" ] && [ -n "$event" ] && [ -n "$body" ] || usage
@@ -261,10 +327,16 @@ if [ -n "$auto" ]; then
   jq -e --arg pr "$pr" 'type == "array" and any(.[]; . == $pr)' "$q" >/dev/null 2>&1 \\
     || err "refusing: $pr is not a PR Automate Review queued; ask the user"
   sel="$pr"
+elif [ -n "$batch" ]; then
+  sel="$pr"
 else
+  # Asked of the user: the selected PR, or one of the batch.
   sel="$(jq -r '.url // empty' "$g" 2>/dev/null)"
-  [ -n "$sel" ] || err 'no PR is selected in MasterDeck: ask the user to click one'
-  [ "$pr" = "$sel" ] || err "refusing: $pr is not the PR selected in MasterDeck ($sel); ask the user"
+  bid="$(entry "$pr")"
+  if [ "$pr" != "$sel" ]; then
+    [ -n "$bid" ] || { [ -n "$sel" ] || err 'no PR is selected in MasterDeck: ask the user to click one'; err "refusing: $pr is not the PR selected in MasterDeck ($sel) nor in its batch; ask the user"; }
+    sel="$pr"
+  fi
 fi
 root="$(cd "$d" && pwd -P)" || err 'the review folder is gone'
 # A file this review reads: a regular file really inside the folder (links resolved).
@@ -280,10 +352,12 @@ inside() {
 [ -z "$comments" ] || (cd "$d" && inside "$comments") || err 'the comments file must be a file in the review folder'
 case "$body" in /*) bf="$body" ;; *) bf="$d/$body" ;; esac
 cf=''
+n=0
 if [ -n "$comments" ]; then
   case "$comments" in /*) cf="$comments" ;; *) cf="$d/$comments" ;; esac
   jq -e 'type == "array" and all(.[]; (.path | type == "string") and (.body | type == "string") and (.line | type == "number"))' "$cf" >/dev/null 2>&1 \\
     || err 'the comments file must be a JSON array of {"path", "line", "body"}'
+  n="$(jq 'length' "$cf")"
 fi
 path="$(printf '%s' "$sel" | sed -n 's#^https://github\\.com/\\([A-Za-z0-9-]*\\)/\\([A-Za-z0-9._-]*\\)/pull/\\([0-9]*\\)/*$#repos/\\1/\\2/pulls/\\3/reviews#p')"
 [ -n "$path" ] || err "not a GitHub PR: $sel"
@@ -298,14 +372,22 @@ if [ -n "$dry" ]; then
   jq -c --arg pr "$pr" '{ok: true, dryRun: true, pr: $pr, review: .}' "$tmp"
   exit 0
 fi
+# One post per batch entry: claimed at once (mkdir either makes it or finds it), kept once posted.
+if [ -n "$batch" ]; then
+  mkdir -p "$l.d" 2>/dev/null
+  mkdir "$l.d/$bid" 2>/dev/null || err "refusing: a review of $pr is already being posted for this batch"
+  claim="$l.d/$bid"
+fi
 acct="$(jq -r '.account // empty' "$g" 2>/dev/null)"
 if [ -n "$acct" ]; then
-  who="$(gh api user --jq .login 2>/dev/null)" || err 'could not ask GitHub who this session is'
+  who="$(gh api user --jq .login 2>/dev/null)" || fail 'could not ask GitHub who this session is'
   a="$(printf '%s' "$acct" | tr '[:upper:]' '[:lower:]')"
   w="$(printf '%s' "$who" | tr '[:upper:]' '[:lower:]')"
-  [ "$a" = "$w" ] || err "refusing: this session is $who on GitHub, the tab's account is $acct"
+  [ "$a" = "$w" ] || fail "refusing: this session is $who on GitHub, the tab's account is $acct"
 fi
-res="$(gh api -X POST "$path" --input "$tmp" 2>&1)" || err "GitHub refused the review: $(printf '%s' "$res" | head -c 400)"
+res="$(gh api -X POST "$path" --input "$tmp" 2>&1)" || fail "GitHub refused the review: $(printf '%s' "$res" | head -c 400)"
+url="$(printf '%s' "$res" | jq -r '.html_url // empty' 2>/dev/null)"
+logline posted '' "\${url:-$pr}" "$n"
 printf '%s' "$res" | jq -c '{ok: true, url: .html_url, state: .state}' 2>/dev/null || out '{"ok":true}'
 `
 }

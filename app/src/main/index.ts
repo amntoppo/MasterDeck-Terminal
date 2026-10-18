@@ -84,6 +84,7 @@ import {
   defaultAccount,
   isMulti,
   knownProject,
+  primaryLogin,
   ticketAccount,
   noreplyEmail,
   parseGhUser,
@@ -183,9 +184,11 @@ import { cardBoardless, repoBoardless } from "@shared/derivedBoard";
 import { accountGh, BoardCreator, columnsOf } from "./boardCreate";
 import { folderAccount, pumpTicketDir, ticketBuilderDir, ticketDirOk, ticketDirs, ticketPane } from "./ticketDirs";
 import { prepareSetupDir, SetupPump, setupClaudeDir } from "./setupClaude";
-import { prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from "./prReviewDirs";
+import { prReviewBatchLog, prReviewDir, prReviewDirOk, prReviewFolderAccount, prReviewGuard, prReviewPane, prReviewPost, prReviewTurn, writePrReviewAuto, writePrReviewBatch, writePrReviewContext, writePrReviewContextBatch, writePrReviewDir, writePrReviewFiles } from "./prReviewDirs";
+import { ReviewBatch } from "./reviewBatch";
+import { prsForAccount } from "@shared/teamPrs";
 import { AutoReview, paneReady, readTurn } from "./autoReview";
-import { prReviewBriefing, prReviewContext, type PrReviewRequest } from "@shared/prReview";
+import { prReviewBatch, prReviewBriefing, prReviewContext, type PrReviewContext, type PrReviewRequest } from "@shared/prReview";
 import { branchKey, LinkStore } from "./ticketLinks";
 import {
   readRemoved,
@@ -928,7 +931,7 @@ const autoReview = new AutoReview(join(paths.home, "auto-review.json"), {
         else
           writePrReviewDir(
             dir,
-            prReviewContext({ tabId, tab: tab.name, ...(multi && tab.account ? { account: tab.account } : {}), filters: tab.filters }, latest?.teamPrs ?? []),
+            withBatch(tabId, prReviewContext({ tabId, tab: tab.name, ...(multi && tab.account ? { account: tab.account } : {}), filters: tab.filters }, latest?.teamPrs ?? [])),
             briefing,
             guard,
             post,
@@ -963,6 +966,28 @@ const autoReview = new AutoReview(join(paths.home, "auto-review.json"), {
     }),
   onChange: () => sources.changed(),
 });
+// Review selected (#176): the PR tabs' batches, reviewed by their review sessions in parallel.
+const reviewBatch = new ReviewBatch(join(paths.home, "review-batch.json"), {
+  logFile: (tabId) => prReviewBatchLog(prReviewGuard(paths.home, tabId)),
+  writeBatch: (tabId, entries) => writePrReviewBatch(prReviewGuard(paths.home, tabId), entries),
+  writeContext: (tabId, items) => writePrReviewContextBatch(prReviewDir(paths.home, tabId), prReviewBatch(items, latest?.teamPrs ?? [])),
+  onChange: () => sources.changed(),
+});
+/** A context written whole carries the tab's batch (main's own, never the folder's). */
+const withBatch = (tabId: string, ctx: PrReviewContext): PrReviewContext => ({ ...ctx, batch: prReviewBatch(reviewBatch.items(tabId), latest?.teamPrs ?? []) });
+/**
+ * The account a PR tab's review session works as: two or more accounts, the tab's own, connected
+ * (a browser never moves a tab's session to another account); one, none (gh's active account).
+ */
+function reviewTabAccount(remote: boolean, cfg: Parameters<typeof isMulti>[0], tabId: string, want: unknown, what: string): { account?: string } | { error: string } {
+  if (!isMulti(cfg)) return {};
+  const w = typeof want === "string" ? want.toLowerCase() : "";
+  const account = cfg.accounts.find((a) => a.login.toLowerCase() === w)?.login;
+  if (!account) return { error: `refusing ${what} as an account that is not connected` };
+  const held = prReviewFolderAccount(paths.home, tabId);
+  if (remote && held && held.toLowerCase() !== account.toLowerCase()) return { error: `refusing ${what} as ${account}: that tab's session works as ${held}` };
+  return { account };
+}
 function mtimeMs(p: string): number {
   try {
     return statSync(p).mtimeMs;
@@ -3054,19 +3079,10 @@ function registerIpc(): void {
     }
     if (!prReviewDirOk(paths.home, dir))
       return { ok: false, message: "refusing a PR review folder that is a link", canContinue: false };
-    // Two or more accounts: the tab's own, connected; one: none (gh's active account).
-    let account: string | undefined;
-    if (isMulti(cfg)) {
-      const want = typeof o.account === "string" ? o.account.toLowerCase() : "";
-      account = cfg.accounts.find((a) => a.login.toLowerCase() === want)?.login;
-      if (!account)
-        return { ok: false, message: "refusing a PR review as an account that is not connected", canContinue: false };
-      // A browser never moves a tab's session to another account (the window does, by the tab's picker).
-      const held = prReviewFolderAccount(paths.home, o.tabId as string);
-      if (isRemote(e) && held && held.toLowerCase() !== account.toLowerCase())
-        return { ok: false, message: `refusing a PR review as ${account}: that tab's session works as ${held}`, canContinue: false };
-    }
-    const ctx = prReviewContext(
+    const who = reviewTabAccount(isRemote(e), cfg, o.tabId as string, o.account, "a PR review");
+    if ("error" in who) return { ok: false, message: who.error, canContinue: false };
+    const account = who.account;
+    const ctx = withBatch(o.tabId as string, prReviewContext(
       {
         tabId: o.tabId as string,
         tab: typeof o.tab === "string" ? o.tab : "",
@@ -3075,7 +3091,7 @@ function registerIpc(): void {
         ...(typeof o.url === "string" ? { url: o.url } : {}),
       },
       latest.teamPrs,
-    );
+    ));
     const guard = prReviewGuard(paths.home, o.tabId as string);
     try {
       if (o.context === true && existsSync(join(dir, "CLAUDE.md"))) writePrReviewContext(dir, ctx, guard);
@@ -3112,6 +3128,26 @@ function registerIpc(): void {
     }
     return autoReview.set(tabId, { ...o, account }, isRemote(e));
   });
+  // Review selected (#176): the ticked PRs join the tab's batch, each looked up in MasterDeck's own
+  // list of the tab's account (a browser names only URLs). The window types the answered line.
+  reg.handle(CH.reviewBatchAdd, (e, raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    const cfg = latest?.config;
+    if (!cfg || !latest) return { ok: false, message: "the PRs are not loaded yet" };
+    let dir: string;
+    try {
+      dir = prReviewDir(paths.home, typeof o.tabId === "string" ? o.tabId : null);
+    } catch (err) {
+      return { ok: false, message: (err as Error).message };
+    }
+    if (!prReviewDirOk(paths.home, dir)) return { ok: false, message: "refusing a PR review folder that is a link" };
+    const who = reviewTabAccount(isRemote(e), cfg, o.tabId as string, o.account, "a batch review");
+    if ("error" in who) return { ok: false, message: who.error };
+    return reviewBatch.add(o.tabId, o.urls, who.account ? prsForAccount(latest.teamPrs, who.account, primaryLogin(cfg)) : latest.teamPrs);
+  });
+  // A browser cancels a batch, never forgets a tab (its tabs are its own, with the window's ids).
+  reg.handle(CH.reviewBatchCancel, (e, tabId: unknown, forget: unknown) => reviewBatch.cancel(tabId, forget === true && !isRemote(e)));
+  reg.handle(CH.reviewBatchRetry, (_e, tabId: unknown, url: unknown) => reviewBatch.retry(tabId, url));
   // Watch any PR (#182): the eye and the Watched PRs list, for a PR tab, as its account. A browser
   // asked with webConfirm before stopping a session's own watch; the window asks here.
   reg.handle(CH.prWatchSet, async (e, raw: unknown) => {
@@ -4837,6 +4873,8 @@ app.whenReady().then(async () => {
   prWatch.load();
   autoReview.load();
   sources.setAutoReview(() => autoReview.view());
+  reviewBatch.load();
+  sources.setReviewBatch(() => reviewBatch.view());
   // Only PRs whose session can take a message now: a parked session's offer stays in Needs you.
   sources.setWatchedPrs(() =>
     prWatch.watched(
@@ -4860,6 +4898,12 @@ app.whenReady().then(async () => {
         autoReview.deliver();
       } catch (e) {
         console.error(`auto review: ${String(e)}`);
+      }
+      // Review selected: what the review sessions' post scripts logged.
+      try {
+        reviewBatch.tick();
+      } catch (e) {
+        console.error(`review batch: ${String(e)}`);
       }
     }, 2_000);
   // Schedules: every 30 s, and at once when the Mac wakes (missed runs, as each schedule says).

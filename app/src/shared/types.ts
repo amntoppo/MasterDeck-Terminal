@@ -245,6 +245,8 @@ export interface AppState {
   watches: WatchInfo[];
   /** Automate Review per PR tab and the PRs it follows (#157; main/autoReview.ts). */
   autoReview?: import("./autoReview").AutoReviewView;
+  /** Review selected per PR tab (#176; main/reviewBatch.ts): each ticked PR and its status. */
+  reviewBatch?: import("./reviewBatch").BatchView;
   /** Every PR watch, automatic or the user's own (#182; main/prWatch.ts `rows`): the eye and Watched PRs. */
   prWatches?: import("./watchPr").PrWatchRow[];
   /**

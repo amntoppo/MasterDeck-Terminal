@@ -71,6 +71,7 @@ import { SETUP_CLAUDE_NAME } from "@shared/setupClaude";
 import { isTicketBuilderSession } from "./ticketDirs";
 import { isPrReviewSession } from "./prReviewDirs";
 import type { AutoReviewView } from "@shared/autoReview";
+import type { BatchView } from "@shared/reviewBatch";
 import type { PrWatchRow } from "@shared/watchPr";
 import {
   newFlowTrack,
@@ -1082,6 +1083,10 @@ export class Sources {
   private autoReview: () => AutoReviewView | undefined = () => undefined;
   setAutoReview(f: () => AutoReviewView): void {
     this.autoReview = f;
+  }
+  private reviewBatch: () => BatchView | undefined = () => undefined;
+  setReviewBatch(f: () => BatchView): void {
+    this.reviewBatch = f;
   }
   setWatchInfo(f: () => WatchInfo[]): void {
     this.watchInfo = f;
@@ -2592,6 +2597,7 @@ export class Sources {
       watches: this.watchInfo(),
       prWatches: this.prWatches(sessions),
       autoReview: this.autoReview(),
+      reviewBatch: this.reviewBatch(),
       schedules: Object.fromEntries(
         sessions
           .filter((s) => s.state !== "done")
