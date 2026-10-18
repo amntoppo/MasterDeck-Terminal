@@ -454,7 +454,16 @@ buttons; it does not go through macOS window drag regions.
   timers: reads on open, on a click or on an existing event. Spec and plan:
   `docs/superpowers/{specs,plans}/2026-10-18-dashboard*`; ARCHITECTURE "The Dashboard and the
   activity log", GUIDE "Dashboard".
-  CHECKS: <filled in by the session>
+  Checked: typecheck, vitest (251 files passed, 2 skipped; 3359 tests passed, 5 skipped),
+  `build:web`; the web preview over CDP (`/?preview`, `/?preview=empty`) at 1400 and 390 px in
+  dark and light (each card, Reply…, Customise with real pointer drags, ⌥ arrows, hide/show, Reset,
+  kept after a reload, drag while scrolling, the phone's filter sheet); the isolated Electron app
+  with a stand-in `claude` and a board fixture (first rail icon and the palette, Open on →
+  Dashboard after a relaunch with no other view drawn first, `activity.jsonl` gaining
+  session-started and ticket-moved and keeping them after a relaunch, `procs:all` against this
+  Mac's real `ps`/`lsof` finding a detached `http.server` as a stray); idle renderer CPU over 2
+  minutes equal on Terminals and Dashboard (0.3–0.4 %, ~160 wakeups/min). Not checked: the real
+  web app over the bridge, a real phone, Windows, real sessions and GitHub data in the installed app.
   Open points: TODO ("Dashboard (#183): open points").
 
 - **Watch any PR (#182)** on branch `worktree-182-watch-any-pr` (PR, not merged, **not
