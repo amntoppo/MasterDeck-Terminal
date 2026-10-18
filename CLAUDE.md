@@ -70,7 +70,13 @@ Specs, plans and reports for the remote/account/web work live in the **backend**
   `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`.
 - `docs/` — see the table above. `README.md` — install, first run, config fields.
 - `install.sh` — the one-line macOS installer (downloads the latest release DMG).
-- `.github/workflows/ci.yml` — Python tests, typecheck, vitest, DMG/EXE builds; tags publish a release.
+- `.github/workflows/` — `ci.yml` (Python tests, typecheck, vitest, unpublished DMG/EXE builds on PRs
+  and `main`), `release.yml` (a `v*` tag, or called: build, attach, then `ota-release.yml`, which
+  signs and publishes the in-app update) and `ota-main.yml`: **every merge to `main` that changes
+  the app is released to users** once CI passes (patch + 1 from the latest tag, or `package.json`'s
+  higher minor/major; a release commit only the tag holds; channel/rollout from the repo variables
+  `OTA_MAIN_CHANNEL` / `OTA_MAIN_ROLLOUT`, `OTA_MAIN=off` pauses it; logic in
+  `app/scripts/auto-release.mjs`). See [OPERATIONS § Release](docs/OPERATIONS.md#release).
 
 ## Commands
 
@@ -420,9 +426,22 @@ buttons; it does not go through macOS window drag regions.
 - Deliberate simplifications carry a `ponytail:` comment naming the ceiling and the upgrade path.
 - Commits: a clear subject, then a body that explains the change and why; no ticket noise. Commit
   messages end with the `Co-Authored-By` line the session gives you.
-- Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release) (only when the user asks).
+- Releases: see [OPERATIONS § Release](docs/OPERATIONS.md#release). A merge to `main` that changes the app is released to users automatically (`ota-main.yml`); a release by hand only when the user asks.
 
 ## Current state and next steps (2026-10-17)
+
+- **Every merge to `main` publishes an OTA update (#166)** on branch
+  `worktree-MasterDeck-Terminal-166-ota-on-merge` (PR, not merged; nothing runs until it is on
+  `main`, and then the next app merge is its first real run). `ota-main.yml` after CI, the version
+  and notes from `app/scripts/auto-release.mjs`, a release commit held only by the tag, then
+  `release.yml` (now callable) and `ota-release.yml` (now takes a rollout when called); commit status
+  **OTA release** and a PR comment on failure. Spec and plan:
+  `docs/superpowers/{specs,plans}/2026-10-18-ota-on-merge*`. Backend PR #12 was already merged
+  (2026-10-15) and deployed. Checked: vitest for the script, actionlint, and the prepare job's shell
+  run against a throwaway clone with stand-in `gh` / `curl` (first release, re-runs before and after
+  publishing, docs only, the next patch, an older commit, beta, off, a bad rollout). Not checked: a
+  real run on GitHub Actions (needs the merge), an install seeing the update. Open points: TODO
+  ("OTA on every merge (#166)").
 
 - **PR watch: same-account reviews and read failures (#158)** on branch
   `worktree-158-pr-watch-same-account` (PR, not merged, **not installed**: the rebuild of the real

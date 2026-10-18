@@ -2,10 +2,26 @@ name: Release
 
 # A tag v* builds the installers, attaches them and the update files to the GitHub release, then
 # runs ota-release.yml, which publishes the in-app update (signed, app/scripts/release-publish.mjs).
-# ci.yml does not run on tags, so a tag is built once. docs/OPERATIONS.md § Release.
+# ci.yml does not run on tags, so a tag is built once. ota-main.yml calls it for every merge to
+# main (a tag it pushes with GITHUB_TOKEN starts no workflow). docs/OPERATIONS.md § Release.
 on:
   push:
     tags: ['v*']
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      rollout:
+        description: 'Percent of installs that get the update at first (empty: 100)'
+        type: string
+        required: false
+        default: ''
+    secrets:
+      RELEASE_ADMIN_TOKEN:
+        required: true
+      RELEASE_SIGNING_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       tag:
@@ -105,6 +121,17 @@ jobs:
             echo "::error::tag $TAG does not match app/package.json's version $pkg"
             exit 1
           fi
+      # The update's notes (.github/releases/<tag>.md, which ota-main.yml writes from the merged
+      # PRs) on top of the install text.
+      - name: Release text
+        run: |
+          body="$RUNNER_TEMP/release-body.md"
+          : > "$body"
+          if [ -f ".github/releases/$TAG.md" ]; then
+            cat ".github/releases/$TAG.md" >> "$body"
+            echo >> "$body"
+          fi
+          cat .github/release-notes.md >> "$body"
       # The DMGs and EXE for new installs, and the update files (the mac zips, the EXE's blockmap)
       # that ota-release.yml publishes as the in-app update. Attached first, so a live update always
       # has its installers on GitHub.
@@ -112,9 +139,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          # How to install and what's new, on every release; also the in-app update's notes unless
+          # What's new and how to install, on every release; also the in-app update's notes unless
           # .github/releases/v<version>.md exists.
-          body_path: .github/release-notes.md
+          body_path: ${{ runner.temp }}/release-body.md
           # A beta tag (v0.10.0-beta.1) is a prerelease, so install.sh's "latest" stays stable.
           prerelease: ${{ contains(env.TAG, '-') }}
           files: |
@@ -131,6 +158,7 @@ jobs:
     uses: ./.github/workflows/ota-release.yml
     with:
       tag: ${{ inputs.tag || github.ref_name }}
+      rollout: ${{ inputs.rollout || '' }}
     secrets:
       RELEASE_ADMIN_TOKEN: ${{ secrets.RELEASE_ADMIN_TOKEN }}
       RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

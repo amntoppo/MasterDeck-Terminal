@@ -1288,7 +1288,8 @@ the DMG has updates off (Settings → Updates says why).
   **Check for updates** in Settings → Updates (or **Check for Updates…** in the MasterDeck menu on a
   Mac) checks now. The section shows your version, when it last checked, and one status line: Up to
   date, Update available, Downloading 42%, Ready to install. A newer version shows its release notes
-  below.
+  below. Every change merged into MasterDeck comes out as a new version within the hour (a patch
+  release whose notes list the changes), so small updates can come often.
 - **The dot on Settings.** While an update is available or ready, the rail's Settings icon has a
   dot (blue: available, green: ready, red: required). Hover it for which.
 - **Downloading.** With **Automatically download updates** on (the default), a new version downloads

@@ -890,6 +890,20 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 - **A START session has no ticket.** It is matched to its proposal by name for reports; if the user
   later links it to a ticket, the proposal stays issue 0.
 
+## OTA on every merge (#166): open points (2026-10-18)
+
+- **P1 · The first real run.** Nothing of `ota-main.yml` ran on GitHub yet: the first app merge
+  after this PR is its first run (and, if no tag came before it, the first real upload to R2). Look
+  at: the commit status on the merge commit, the tag's release commit, the GitHub release's text,
+  Settings → Updates on an installed 0.9.x (installs before #122's updater need one manual update).
+- **P2 · Every app merge builds twice.** CI builds unpublished installers on `main`, then
+  `release.yml` builds the release (CI's builds carry the old version). Upgrade path: skip CI's
+  build job on pushes to `main` once the automatic release has run reliably.
+- **P3 · The non-app file list is fixed** (`isAppFile` in `app/scripts/auto-release.mjs`): a new
+  docs or tooling folder releases once until it is added there.
+- **P3 · A tag protection rule** or ruleset on `v*` would refuse the workflow's `GITHUB_TOKEN`
+  push; none is set today.
+
 ## In-app updates (#122): open points (2026-10-16)
 
 - **P1 · The first real release.** The service is live (2026-10-16: R2 bucket `masterdeck-releases`,
@@ -1024,6 +1038,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   it react by itself.
 
 ## Recently done
+
+- **Every merge to `main` publishes an OTA update (#166)**: `.github/workflows/ota-main.yml` after
+  CI, patch + 1 (or `package.json`'s minor/major), a release commit held only by the tag, notes from
+  the merged PRs, `release.yml` called, channel/rollout from repository variables, a commit status
+  and a PR comment on failure, yank documented (OPERATIONS § Release). Backend PR #12 was already
+  merged. Branch `worktree-MasterDeck-Terminal-166-ota-on-merge`.
 
 - **PR watch delivers same-account reviews and shows read failures (#158)**: an item by the
   watch's own account is held back only when the session's transcript shows it posted that text

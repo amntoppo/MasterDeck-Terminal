@@ -8,6 +8,10 @@ here. For a release `vX.Y.Z`, the OTA workflow (`.github/workflows/ota-release.y
    "What's new" section),
 3. else `MasterDeck X.Y.Z`.
 
+**A merge to `main`** (`.github/workflows/ota-main.yml`) writes this file itself, on the release
+commit only its tag holds (never on `main`): one line per merged PR since the last release. A file
+already on `main` for the version it picks is used as written instead.
+
 Write the file in Markdown, for users: what is new and what was fixed, short. The app draws it as
 Markdown with HTML turned off (every tag shows as text), so plain Markdown only: headings, lists,
 links, **bold**, `code`. Commit it with the version bump, before the tag.
