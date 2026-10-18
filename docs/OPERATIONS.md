@@ -95,11 +95,11 @@ workflow.
 
 ### Automatic release on every merge
 
-`.github/workflows/ota-main.yml` runs when **CI** completes on a push to `main` (`workflow_run`),
+`.github/workflows/ota-main.yml` (**Auto release** in the Actions tab; it calls **Release**, which calls **OTA release**) runs when **CI** completes on a push to `main` (`workflow_run`),
 and only when CI succeeded (a PR's CI, or CI on a fork, never counts). Spec:
 `docs/superpowers/specs/2026-10-18-ota-on-merge-design.md`.
 
-1. **prepare** sets a commit status **OTA release** (pending) on the merge commit, then decides
+1. **prepare** sets a commit status **Auto release** (pending) on the merge commit, then decides
    (`app/scripts/auto-release.mjs`, tested in `auto-release.test.ts`):
    - nothing when the repository variable `OTA_MAIN` is `off`, when the commit is already in a
      release (CI runs finished out of order), or when nothing but docs, tests or CI changed since
@@ -138,7 +138,7 @@ their own, so they never cancel a pending release.
 | `OTA_MAIN_ROLLOUT` | `100` | The first rollout percent; raise it later with `PATCH` (below) |
 | `OTA_MAIN` | on | `off` pauses automatic releases (Run workflow still works) |
 
-`min_supported` is never set automatically. **Run workflow** on *OTA on main* releases the current
+`min_supported` is never set automatically. **Run workflow** on *Auto release* releases the current
 `main` with a channel and rollout picked for that run.
 
 **A failed run.** Nothing reaches users until `ota-release.yml`'s last call. A failure before the

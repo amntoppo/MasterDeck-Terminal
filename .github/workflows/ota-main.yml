@@ -1,4 +1,4 @@
-name: OTA on main
+name: Auto release
 
 # Every merge to main that changes the app reaches users as an in-app update, with no manual step
 # (MasterDeck-Terminal#166). Once CI passed on the merge commit:
@@ -11,7 +11,7 @@ name: OTA on main
 #    .github/releases/vX.Y.Z.md, held only by the tag vX.Y.Z: main never gets a bot commit.
 # 2. release: release.yml (the same build, tests and attach as a hand-pushed tag), which calls
 #    ota-release.yml (sign and publish).
-# 3. report: a commit status "OTA release" on the merge commit; on failure a comment on its PR.
+# 3. report: a commit status "Auto release" on the merge commit; on failure a comment on its PR.
 #
 # Repository variables: OTA_MAIN_CHANNEL (stable | beta, default stable), OTA_MAIN_ROLLOUT (0-100,
 # default 100), OTA_MAIN (off pauses it). Run workflow (from main) releases the current main by hand.
@@ -67,7 +67,7 @@ jobs:
     steps:
       - name: Status pending
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context='OTA release' \
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state=pending -f context='Auto release' \
             -f description='Preparing the update' -f target_url="$RUN_URL" > /dev/null
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -207,7 +207,7 @@ jobs:
         run: |
           set -euo pipefail
           status() {
-            gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$1" -f context='OTA release' \
+            gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$1" -f context='Auto release' \
               -f description="${2:0:140}" -f target_url="$RUN_URL" > /dev/null
           }
           if [ "$PREPARE" = success ] && [ "$RELEASED" = no ]; then

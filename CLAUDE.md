@@ -435,7 +435,7 @@ buttons; it does not go through macOS window drag regions.
   `main`, and then the next app merge is its first real run). `ota-main.yml` after CI, the version
   and notes from `app/scripts/auto-release.mjs`, a release commit held only by the tag, then
   `release.yml` (now callable) and `ota-release.yml` (now takes a rollout when called); commit status
-  **OTA release** and a PR comment on failure. Spec and plan:
+  **Auto release** and a PR comment on failure. Spec and plan:
   `docs/superpowers/{specs,plans}/2026-10-18-ota-on-merge*`. Backend PR #12 was already merged
   (2026-10-15) and deployed. Checked: vitest for the script, actionlint, and the prepare job's shell
   run against a throwaway clone with stand-in `gh` / `curl` (first release, re-runs before and after
