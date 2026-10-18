@@ -10,12 +10,12 @@ import {
   coalesce,
   diffActivity,
   filterActivity,
+  forRemote,
   inboxEvent,
   meetingEvent,
   noteEvent,
   releaseEvents,
   runEvent,
-  seenReleases,
   type ActivityEvent,
 } from './activityLog'
 import type { AppState, BoardCard, GitInfo, Session } from './types'
@@ -328,15 +328,28 @@ describe("the stores' events", () => {
   it('runEvent: ran, failed with its reason, nothing while running', () => {
     expect(runEvent(run(), NOW, ids)).toMatchObject({ type: 'schedule-run', at: NOW, title: 'Nightly triage ran', detail: 'nightly-triage-1018-0300', subject: 'run:r1', target: { schedules: true } })
     expect(runEvent(run({ status: 'failed', reason: 'Workspace not trusted' }), NOW, ids)!.title).toBe('Nightly triage failed: Workspace not trusted')
-    expect(runEvent(run({ status: 'skipped', reason: 'the previous run is still going', sessionName: '' }), NOW, ids)).not.toHaveProperty('detail')
+    const skip = runEvent(run({ status: 'skipped', reason: 'the previous run is still going', sessionName: '' }), NOW, ids)!
+    expect(skip).not.toHaveProperty('detail')
+    // Skips coalesce per schedule; a run is its own subject.
+    expect(skip.subject).toBe('schedskip:s1')
+    expect(runEvent(run({ id: 'r2', status: 'skipped' }), NOW, ids)!.subject).toBe('schedskip:s1')
+    expect(runEvent(run({ id: 'r2', status: 'failed' }), NOW, ids)!.subject).toBe('run:r2')
     expect(runEvent(run({ status: 'running' }), NOW, ids)).toBeNull()
   })
 
   it('meetingEvent: the title and the time recorded, less the pauses', () => {
-    const m = { id: 'm-1', title: 'Standup', started: NOW - 50 * 60_000, ended: NOW, pausedMs: 8 * 60_000 }
+    const m = { id: 'm-1', title: 'Standup', started: NOW - 50 * 60_000, ended: NOW, pausedMs: 8 * 60_000, state: 'transcribing' as const, segments: [] }
     expect(meetingEvent(m, NOW, ids)).toMatchObject({ type: 'meeting', title: 'Meeting recorded: Standup (42 min)', subject: 'meeting:m-1', target: { meeting: 'm-1' } })
     expect(meetingEvent({ ...m, title: ' ' }, NOW, ids)!.title).toBe('A meeting was recorded (42 min)')
     expect(meetingEvent({ ...m, ended: null }, NOW, ids)).toBeNull()
+  })
+
+  it('meetingEvent: an empty recording is not logged', () => {
+    const m = { id: 'm-1', title: '', started: NOW - 60_000, ended: NOW, pausedMs: 0, state: 'failed' as const, segments: [] }
+    expect(meetingEvent(m, NOW, ids)).toBeNull()
+    // A failure after some text was kept is still a meeting.
+    const said = [{ speaker: 'you', start: 0, end: 1000, text: 'hi' }] as never
+    expect(meetingEvent({ ...m, segments: said }, NOW, ids)!.title).toBe('A meeting was recorded (1 min)')
   })
 
   it('noteEvent: a new note only, and nothing of its title, preview or text', () => {
@@ -358,10 +371,18 @@ describe("the stores' events", () => {
   it('inboxEvent: the title and how; not dismissed', () => {
     const entry = (o: Partial<InboxEntry> = {}, item: object = {}): InboxEntry =>
       ({ item: { id: 'ask:a', kind: 'ask', priority: 1, sessionKey: 'a', ticket: null, title: 'api-auth asks which token store', body: '', actions: [], detail: {}, ...item }, state: 'resolved', firstSeen: 0, lastSeen: 0, resolvedHow: 'answered in the session', ...o }) as InboxEntry
-    expect(inboxEvent(entry(), NOW, ids)).toMatchObject({ type: 'needs-you-answered', title: 'api-auth asks which token store', detail: 'answered in the session', subject: 'inbox:ask:a', target: { session: 'a' } })
-    expect(inboxEvent(entry({}, { sessionKey: null, ticket: { repo: 'acme/api', number: 7 } }), NOW, ids)).toMatchObject({ repo: 'acme/api', target: { ticket: { repo: 'acme/api', number: 7 } } })
-    expect(inboxEvent(entry({ resolvedHow: 'dismissed' }), NOW, ids)).toBeNull()
-    expect(inboxEvent(entry({ state: 'open' }), NOW, ids)).toBeNull()
+    expect(inboxEvent(entry(), NOW, undefined, ids)).toMatchObject({ type: 'needs-you-answered', title: 'api-auth asks which token store', detail: 'answered in the session', subject: 'inbox:ask:a', target: { session: 'a' } })
+    expect(inboxEvent(entry({}, { sessionKey: null, ticket: { repo: 'acme/api', number: 7 } }), NOW, undefined, ids)).toMatchObject({ repo: 'acme/api', target: { ticket: { repo: 'acme/api', number: 7 } } })
+    expect(inboxEvent(entry({ resolvedHow: 'dismissed' }), NOW, undefined, ids)).toBeNull()
+    expect(inboxEvent(entry({ state: 'open' }), NOW, undefined, ids)).toBeNull()
+  })
+
+  it('inboxEvent: an item the last run left, gone at launch, is no answer', () => {
+    const entry = (lastSeen: number) =>
+      ({ item: { id: 'ask:a', kind: 'ask', priority: 1, sessionKey: 'a', ticket: null, title: 't', body: '', actions: [], detail: {} }, state: 'resolved', firstSeen: 0, lastSeen, resolvedHow: 'answered in the session' }) as unknown as InboxEntry
+    const start = NOW - 60_000
+    expect(inboxEvent(entry(start - 1), NOW, start, ids)).toBeNull()
+    expect(inboxEvent(entry(start), NOW, start, ids)).not.toBeNull()
   })
 
   it('releaseEvents: once per version, also after a restart', () => {
@@ -374,8 +395,20 @@ describe("the stores' events", () => {
     expect(releaseEvents({ current: '0.9.0', offer }, seen, NOW, ids)).toMatchObject([{ title: 'MasterDeck 0.9.1 is available', subject: 'release:offer:0.9.1' }])
     expect(releaseEvents({ current: '0.9.0', offer }, seen, NOW, ids)).toEqual([])
     // A restart: the seen versions come from the log.
-    const again = seenReleases([...first, { id: 'x', at: NOW, type: 'release', title: 'MasterDeck 0.9.1 is available', subject: 'release:offer:0.9.1' }])
+    const again = new Set(['release:updated:0.9.0', 'release:offer:0.9.1'])
     expect(releaseEvents({ ...st, offer }, again, NOW, ids)).toEqual([])
     expect(releaseEvents({ current: '0.9.1', offer: { version: '0.9.1' } as never }, new Set(), NOW, ids)).toEqual([])
+  })
+})
+
+describe('forRemote', () => {
+  it("drops a meeting's title and target; other events pass as they are", () => {
+    const meeting: ActivityEvent = { id: 'a', at: NOW, type: 'meeting', title: 'Meeting recorded: Secret merger (42 min)', subject: 'meeting:m-1', target: { meeting: 'm-1' } }
+    const other: ActivityEvent = { id: 'b', at: NOW, type: 'session-started', title: 'Session a started', subject: 'session:a', target: { session: 'a' } }
+    const [m, o] = forRemote([meeting, other])
+    expect(m).toEqual({ id: 'a', at: NOW, type: 'meeting', title: 'A meeting was recorded (42 min)', subject: 'meeting:m-1' })
+    expect(JSON.stringify(m)).not.toContain('Secret')
+    expect(o).toBe(other)
+    expect(forRemote([{ ...meeting, title: 'odd' }])[0].title).toBe('A meeting was recorded')
   })
 })

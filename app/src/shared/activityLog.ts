@@ -350,14 +350,19 @@ export function runEvent(r: SchedRun, now: number, ids: () => string = newId(now
   if (r.status === 'running') return null
   const how = r.status === 'done' ? 'ran' : r.status
   const reason = r.status !== 'done' && r.reason ? `: ${r.reason}` : ''
-  const e: ActivityEvent = { id: ids(), at: now, type: 'schedule-run', title: `${r.scheduleName} ${how}${reason}`, subject: `run:${r.id}`, target: { schedules: true } }
+  const e: ActivityEvent = { id: ids(), at: now, type: 'schedule-run', title: `${r.scheduleName} ${how}${reason}`,
+    // Skips can come every slot while a run goes on: one subject per schedule lets them coalesce.
+    subject: r.status === 'skipped' ? `schedskip:${r.scheduleId}` : `run:${r.id}`,
+    target: { schedules: true } }
   if (r.sessionName) e.detail = r.sessionName
   return e
 }
 
 /** A meeting whose recording ended: "Meeting recorded: Standup (42 min)", or with no title yet "A meeting was recorded (42 min)". */
-export function meetingEvent(m: Pick<Meeting, 'id' | 'title' | 'started' | 'ended' | 'pausedMs'>, now: number, ids: () => string = newId(now)): ActivityEvent | null {
+export function meetingEvent(m: Pick<Meeting, 'id' | 'title' | 'started' | 'ended' | 'pausedMs' | 'state' | 'segments'>, now: number, ids: () => string = newId(now)): ActivityEvent | null {
   if (m.ended === null) return null
+  // An empty recording ("Nothing was recorded.") ends failed with no text: nothing was recorded.
+  if (m.state === 'failed' && !m.segments.length) return null
   const min = Math.max(1, Math.round((m.ended - m.started - (m.pausedMs || 0)) / 60_000))
   const title = m.title.trim()
   return {
@@ -391,9 +396,14 @@ export function noteEvent(c: NoteChange, now: number, ids: () => string = newId(
 }
 
 /** A Needs-you item that closed: its title, and how (an answer, or what changed). Not a dismissed one. */
-export function inboxEvent(entry: InboxEntry, now: number, ids: () => string = newId(now)): ActivityEvent | null {
+/**
+ * `since` is when this process started: an item last seen before it was left by the last run and
+ * resolves at launch because it is gone, which is no answer.
+ */
+export function inboxEvent(entry: InboxEntry, now: number, since?: number, ids: () => string = newId(now)): ActivityEvent | null {
   const how = entry.resolvedHow ?? null
   if (entry.state !== 'resolved' || how === 'dismissed') return null
+  if (since !== undefined && entry.lastSeen < since) return null
   const item = entry.item
   const e: ActivityEvent = { id: ids(), at: now, type: 'needs-you-answered', title: item.title || 'A Needs-you item closed', subject: `inbox:${item.id}` }
   if (how) e.detail = how
@@ -402,11 +412,6 @@ export function inboxEvent(entry: InboxEntry, now: number, ids: () => string = n
   if (item.sessionKey) e.target = { session: item.sessionKey }
   else if (item.ticket) e.target = { ticket: { repo: item.ticket.repo ?? null, number: item.ticket.number } }
   return e
-}
-
-/** The release events already in a log (their subjects), so a restart does not log them again. */
-export function seenReleases(events: ActivityEvent[]): Set<string> {
-  return new Set(events.filter((e) => e.type === 'release').map((e) => e.subject))
 }
 
 /**
@@ -432,4 +437,17 @@ export function releaseEvents(s: Pick<UpdateState, 'current' | 'offer' | 'update
     }
   }
   return out
+}
+
+/**
+ * The events as a web tab gets them. Meetings are the Mac's only (every meetings channel is blocked
+ * for the web), so a meeting's line loses its title and its target.
+ */
+export function forRemote(events: ActivityEvent[]): ActivityEvent[] {
+  return events.map((e) => {
+    if (e.type !== 'meeting') return e
+    const min = / \((\d+) min\)$/.exec(e.title)?.[1]
+    const { target: _t, ...rest } = e
+    return { ...rest, title: min ? `A meeting was recorded (${min} min)` : 'A meeting was recorded' }
+  })
 }

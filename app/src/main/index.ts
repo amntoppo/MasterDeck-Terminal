@@ -114,7 +114,6 @@ import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
 import { ActivityLog } from "./activityLog";
 import {
-  ACTIVITY_KEEP_DAYS,
   ACTIVITY_RANGE_MAX_MS,
   diffActivity,
   inboxEvent,
@@ -122,7 +121,7 @@ import {
   noteEvent,
   releaseEvents,
   runEvent,
-  seenReleases,
+  forRemote,
   type ActivityEvent,
 } from "@shared/activityLog";
 import { Scheduler } from "./sched";
@@ -398,22 +397,13 @@ function logActivity(what: string, make: () => ActivityEvent | ActivityEvent[] |
     console.error(`activity: ${what}: ${String((err as Error)?.message ?? err).slice(0, 200)}`);
   }
 }
-/** The release lines already logged (subjects), read from the log once, so a restart does not repeat them. */
+/**
+ * The release lines already logged (subjects), read from the log once, so a restart does not repeat
+ * them. The log keeps 14 days: an offer still pending after that may be logged once more.
+ */
 let releasesSeen: Set<string> | null = null;
 function logRelease(s: UpdateState): void {
-  logActivity("release", () => {
-    if (!releasesSeen) {
-      // ponytail: list() answers at most 1000 events, so the log is read a day at a time; a day of
-      // more than 1000 events could hide a release line, which would then be logged once more.
-      // Upgrade: a query by type on ActivityLog.
-      const now = Date.now();
-      const all: ActivityEvent[] = [];
-      for (let d = 0; d <= ACTIVITY_KEEP_DAYS; d++)
-        all.push(...activity.list(now - (d + 1) * 86_400_000, d === 0 ? Number.MAX_SAFE_INTEGER : now - d * 86_400_000));
-      releasesSeen = seenReleases(all);
-    }
-    return releaseEvents(s, releasesSeen, Date.now());
-  });
+  logActivity("release", () => releaseEvents(s, (releasesSeen ??= activity.subjects("release")), Date.now()));
 }
 
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
@@ -1410,10 +1400,11 @@ function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
 }
 
 // Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
-// A resolution is logged (not a dismissed one); the inbox resolves nothing while it is silent.
+// A resolution is logged (not a dismissed one, nor an item the last run left that is gone at launch);
+// the inbox resolves nothing while it is silent.
 sources.inbox.on("event", (e) => {
   if (e.type === "added") notifyItem(e.entry);
-  else if (e.type === "resolved") logActivity("inbox", () => inboxEvent(e.entry, Date.now()));
+  else if (e.type === "resolved") logActivity("inbox", () => inboxEvent(e.entry, Date.now(), processStart));
 });
 
 /** Answer the menu on a session's screen, if it is still the question the user saw. */
@@ -2902,14 +2893,17 @@ function registerIpc(): void {
   // Schedules (#140). The web asked with webConfirm before a delete; the window asks here.
   reg.handle(CH.schedList, () => scheduler.list());
   // The Dashboard's Timeline (#183): two finite times, since ≤ until, at most 31 days apart; else [].
-  reg.handle(CH.activityList, (_e, since: unknown, until: unknown) =>
+  // A web tab gets meetings without their titles (forRemote): meetings are the Mac's only.
+  reg.handle(CH.activityList, (e, since: unknown, until: unknown) =>
     typeof since === "number" &&
     typeof until === "number" &&
     Number.isFinite(since) &&
     Number.isFinite(until) &&
     since <= until &&
     until - since <= ACTIVITY_RANGE_MAX_MS
-      ? activity.list(since, until)
+      ? isRemote(e)
+        ? forRemote(activity.list(since, until))
+        : activity.list(since, until)
       : [],
   );
   reg.handle(CH.schedSave, (_e, input: unknown) => scheduler.save(input));

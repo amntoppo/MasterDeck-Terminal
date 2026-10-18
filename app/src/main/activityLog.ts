@@ -8,6 +8,7 @@ import {
   cleanEvent,
   coalesce,
   type ActivityEvent,
+  type ActivityType,
 } from '@shared/activityLog'
 
 const KEEP_MS = ACTIVITY_KEEP_DAYS * 86_400_000
@@ -106,6 +107,13 @@ export class ActivityLog {
     } catch (err) {
       this.fail('add', err)
     }
+  }
+
+  /** The subjects of every kept event of one type, in one pass over memory. */
+  subjects(type: ActivityType): Set<string> {
+    const out = new Set<string>()
+    for (const e of this.events) if (e.type === type) out.add(e.subject)
+    return out
   }
 
   /** Events with since ≤ at ≤ until, newest first, at most `limit` (and never more than 1000). */

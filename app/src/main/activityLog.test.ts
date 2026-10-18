@@ -51,6 +51,16 @@ describe('ActivityLog', () => {
     expect(log.list(NOW, 0)).toEqual([])
   })
 
+  it('subjects: one type\'s subjects, from memory, also after a reload', () => {
+    const log = new ActivityLog(file, { now: () => NOW })
+    log.add(ev({ type: 'release', subject: 'release:updated:0.9.0' }))
+    log.add(ev({ type: 'release', subject: 'release:offer:0.9.1', at: NOW + 1 }))
+    log.add(ev({ subject: 'session:x' }))
+    expect([...log.subjects('release')].sort()).toEqual(['release:offer:0.9.1', 'release:updated:0.9.0'])
+    expect([...new ActivityLog(file, { now: () => NOW }).subjects('release')].sort()).toEqual(['release:offer:0.9.1', 'release:updated:0.9.0'])
+    expect(log.subjects('meeting').size).toBe(0)
+  })
+
   it('reads the file back in a new instance', () => {
     const a = new ActivityLog(file, { now: () => NOW })
     a.add(ev({ at: NOW - 2000 }))
