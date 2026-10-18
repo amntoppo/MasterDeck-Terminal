@@ -260,6 +260,8 @@ export function Rail({ view, onView, onAction, needs, prAttention, remote, onRem
     const p = press.current
     const box = nav.current
     if (!p || !box || p.pointer !== e.pointerId) return
+    // A press let go outside the rail before it became a drag: no button is down any more.
+    if (!e.buttons) return void end()
     if (!live.current) {
       if (Math.abs(e.clientY - p.y) < DRAG_PX && Math.abs(e.clientX - p.x) < DRAG_PX) return
       const top = box.getBoundingClientRect().top

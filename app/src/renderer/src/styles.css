@@ -861,7 +861,7 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .rail.dragging .rb::after, .rail.menu-open .rb::after, .rail.dragging .ri-card { display: none; }
 .rail-drop { position: absolute; left: 10px; right: 10px; height: 2px; margin-top: -1px; border-radius: 1px; background: var(--accent); pointer-events: none; }
 .menu.rail-menu { position: fixed; right: auto; z-index: 60; min-width: 180px; }
-.menu button:disabled { color: var(--muted); cursor: default; background: none; }
+.menu.rail-menu button:disabled { color: var(--muted); cursor: default; background: none; }
 .rb { position: relative; width: 36px; height: 36px; flex: none; border-radius: 9px; border: none; background: none; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; -webkit-app-region: no-drag; }
 .rb:hover { background: var(--bg-3); color: var(--text); }
 .rb.on { background: var(--bg-4); color: var(--text); }
