@@ -165,6 +165,47 @@ export function pruneGroups(
   return changed ? { ...d, of } : d
 }
 
+/**
+ * A session started into a tab (#171) that is not listed yet: its key is unknown until a poll lists
+ * it, so it is matched by name. `skip`: keys of the sessions with that name already listed when it
+ * started (done ones too), never pulled in; a new one is claimed even if it is done by its first poll.
+ */
+export interface GroupWait {
+  name: string
+  group: string
+  skip: string[]
+  at: number
+}
+
+/**
+ * Put each expected session that is now listed in its tab (unless it is in one already). A wait
+ * whose tab is gone, or older than `ms` (the session never showed up), is dropped. Returns d and
+ * waits themselves when nothing changed.
+ */
+export function claimWaits(
+  d: SessionGroups,
+  waits: GroupWait[],
+  sessions: { key: string; name: string }[],
+  now = Date.now(),
+  ms = GROUP_GRACE_MS,
+): { groups: SessionGroups; waits: GroupWait[] } {
+  let of: Record<string, string> | null = null
+  const left: GroupWait[] = []
+  for (const w of waits) {
+    if (now - w.at > ms || !d.groups.some((g) => g.id === w.group)) continue
+    const s = sessions.find((x) => x.name === w.name && !w.skip.includes(x.key))
+    if (!s) {
+      left.push(w)
+      continue
+    }
+    if (okKey(s.key) && !has(of ?? d.of, s.key)) (of ??= { ...d.of })[s.key] = w.group
+  }
+  return {
+    groups: of ? { ...d, of } : d,
+    waits: left.length === waits.length ? waits : left,
+  }
+}
+
 /** The file's contents, cleaned; null when it is not a groups file at all. */
 export function parseGroups(raw: unknown): SessionGroups | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
