@@ -39,7 +39,10 @@ jobs:
             merge_group) base="$MG_BASE"; head="$MG_HEAD" ;;
             *) printf 'code=yes\nworkflows=yes\n' | tee -a "$GITHUB_OUTPUT"; exit 0 ;;
           esac
-          node app/scripts/ci-changes.mjs --base "$base" --head "$head" | tee -a "$GITHUB_OUTPUT"
+          # The base's copy decides: a PR cannot switch its own tests off by breaking this script.
+          tool="$RUNNER_TEMP/ci-changes.mjs"
+          git show "$base:app/scripts/ci-changes.mjs" > "$tool" 2>/dev/null || cp app/scripts/ci-changes.mjs "$tool"
+          node "$tool" --base "$base" --head "$head" | tee -a "$GITHUB_OUTPUT"
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -79,6 +82,8 @@ jobs:
           ref: master
           path: masterdeck-backend
           ssh-key: ${{ secrets.BACKEND_DEPLOY_KEY }}
+          # The key must not stay for npm ci's install scripts and the PR's tests to read.
+          persist-credentials: false
           sparse-checkout: src/protocol.ts
           sparse-checkout-cone-mode: false
       - name: No backend checkout

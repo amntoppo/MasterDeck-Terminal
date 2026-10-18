@@ -94,7 +94,7 @@ for a merge queue, and by hand), checks only, on `ubuntu-latest`, in parallel:
 
 | Job | What | When |
 |---|---|---|
-| `changes` | `app/scripts/ci-changes.mjs` (tested): what the PR changed since it left the base | always |
+| `changes` | `app/scripts/ci-changes.mjs` (tested; the base commit's copy, so a PR cannot switch its own tests off): what the PR changed since it left the base | always |
 | `python` | `pytest skills/master/tests` (pip cache, `.github/requirements-ci.txt`) | `code` |
 | `app` | `npm run typecheck`, `npm test` (npm cache, no Electron download); the protocol drift test against the backend when the secret `BACKEND_DEPLOY_KEY` is set | `code` |
 | `actionlint` | every workflow, with shellcheck on their scripts | a `.github/workflows` or `.github/actions` YAML changed |
@@ -126,8 +126,9 @@ by PRs.
 tag; a tag made before #178 has no `.github/actions/` and fails at its setup step, but those are
 released already):
 
-1. **test** (ubuntu) runs the Python tests, typecheck and vitest on the tag's commit (a merge can
-   differ from the PR head that passed CI), before any mac/win minute.
+1. **test** runs the Python tests, typecheck and vitest on the tag's commit (a merge can differ
+   from the PR head that passed CI) on ubuntu, macOS and Windows, before the builds: PR CI runs on
+   ubuntu only, so this is where the macOS-only tests (`updateHelper`) and the Windows paths run.
 2. **build** calls `build.yml` with the tag; it uploads the DMGs, the mac zips, the EXE, the
    blockmaps and `latest*.yml` as artifacts.
 3. **release** (ubuntu) checks the tag against `app/package.json`'s version and attaches the DMGs
@@ -180,7 +181,10 @@ push that touches only docs, tests or CI starts nothing (`paths-ignore`, the sam
    **Done** on the board when the secret `BOARD_TOKEN` and the variable `BOARD_PROJECT` are set
    (an issue not on that board is left alone). Without them it says so in a notice.
 4. **report** sets the status to success (the version, channel and rollout, or why nothing was
-   released) or failure, and on failure comments on the merged PR with the run's link.
+   released) or failure, and on failure comments on the merged PR with the run's link. A failure
+   after the publish (the smoke check) leaves the update live: the report asks the update service
+   (a published file is served `immutable`) and then says "vX.Y.Z is live, but a check after
+   publishing failed" instead of "nothing was offered to users".
 
 **Order.** One concurrency group, `ota-main-refs/heads/main`, never cancelled in progress. GitHub keeps one pending
 run and cancels older pending ones: the run left releases the newest commit, which holds every
@@ -293,7 +297,7 @@ update may be live but broken, so look at the log, and yank it if a file is wron
 | `RELEASE_ADMIN_TOKEN` | The backend's `RELEASE_ADMIN_TOKEN` (the admin routes' bearer token) |
 | `RELEASE_SIGNING_KEY` | The release private key, PKCS8 PEM (the whole file, `-----BEGIN PRIVATE KEY-----` included) |
 | `BOARD_TOKEN` | Optional: a classic personal access token with the `project` scope (a fine-grained one needs Projects read and write on the board's owner), for Auto release's **announce** (tickets to Done). Unset: tickets are not moved |
-| `BACKEND_DEPLOY_KEY` | Optional: the private half of a **read-only deploy key** of `masterdeck-backend` (`ssh-keygen -t ed25519 -N '' -f k`; backend → Settings → Deploy keys gets `k.pub`), for CI's protocol drift test (#5). Unset (and on forks): the test skips with a notice |
+| `BACKEND_DEPLOY_KEY` | Optional: the private half of a **read-only deploy key** of `masterdeck-backend` (`ssh-keygen -t ed25519 -N '' -f k`; backend → Settings → Deploy keys gets `k.pub`), for CI's protocol drift test (#5). Unset (and on forks): the test skips with a notice. The checkout does not keep the key (`persist-credentials: false`), so nothing the PR runs can read it; keep it read-only |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Optional: for **Web deploy** (below). A token from the "Edit Cloudflare Workers" template on the account and the `masterdeck.dev` zone (Workers Scripts edit, Workers Routes edit, the zone's DNS for the custom domain). Unset: the web app is not deployed, with a notice |
 
 The private key is also kept on the owner's Mac at
@@ -365,7 +369,8 @@ others beside the real zip.
 **On merge** (`.github/workflows/web-deploy.yml`, **Web deploy**, #178): every push to `main` that
 changes what the web app is built from (`app/src/web/`, `app/src/renderer/`, `app/src/shared/`,
 `app/web/`, `app/vite.web.config.ts`, `app/package.json` and its lock; not tests or Markdown) runs
-`build:web` and `wrangler@4 deploy -c web/wrangler.jsonc` with the secrets `CLOUDFLARE_API_TOKEN`
+typecheck and vitest on `main` as merged (two PRs green alone can break together), then
+`build:web` and `wrangler@4.147.0 deploy -c web/wrangler.jsonc` with the secrets `CLOUDFLARE_API_TOKEN`
 and `CLOUDFLARE_ACCOUNT_ID` (table above), then checks that app.masterdeck.dev serves the bundle the
 built `index.html` names. A commit status **Web deploy** on the commit, and a comment on the
 merged PR on failure. One deploy at a time (a newer push waits). Until the secrets are set it does
@@ -376,7 +381,7 @@ the previous desktop (the protocol stays additive, `PROTOCOL_VERSION`).
 **By hand** (no CI token, or another branch):
 
 ```bash
-cd app && npm run deploy:web     # build:web (MD_API https://dev.masterdeck.dev) + wrangler@4 deploy -c web/wrangler.jsonc
+cd app && npm run deploy:web     # build:web (MD_API https://dev.masterdeck.dev) + wrangler@4.147.0 deploy -c web/wrangler.jsonc
 ```
 
 Publishes the static Worker `masterdeck-web` on `app.masterdeck.dev` (assets `out/web`, SPA

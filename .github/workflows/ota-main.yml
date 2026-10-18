@@ -306,10 +306,24 @@ jobs:
           else
             what="v${VERSION:-?}"
             [ -n "$VERSION" ] || what="the update"
-            status failure "Publishing $what failed: nothing was offered to users"
-            msg="The automatic release of this merge failed, so **$what** was not offered as an in-app update. Run: $RUN_URL
+            # A failure after the publish (the smoke check) leaves the update live: ask the service, as
+            # prepare does (a published file is served immutable).
+            live=no
+            if [ -n "$VERSION" ]; then
+              head="$(curl -sI "$MD_RELEASE_API/v1/updates/files/$VERSION/MasterDeck-$VERSION-mac.zip" || true)"
+              if grep -qi '^cache-control:.*immutable' <<< "$head"; then live=yes; fi
+            fi
+            if [ "$live" = yes ]; then
+              status failure "$what is live, but a check after publishing failed"
+              msg="**$what was published** and is offered to users as an in-app update, but a step after publishing failed (the smoke check). Run: $RUN_URL
+
+          Read the failed step: if a file is wrong or missing, yank $what (docs/OPERATIONS.md § Release, \"Yank a bad update\") and merge a fix; if it was only a network error, **Re-run failed jobs**."
+            else
+              status failure "Publishing $what failed: nothing was offered to users"
+              msg="The automatic release of this merge failed, so **$what** was not offered as an in-app update. Run: $RUN_URL
 
           Nothing reaches users until the last step (ota-release.yml) succeeds. After a fix, **Re-run failed jobs** on that run is safe (a tag already made is released again), or merge the fix and the next release includes this change. See docs/OPERATIONS.md § Release."
+            fi
             for pr in $(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[] | select(.merged_at != null) | .number' || true); do
               gh pr comment "$pr" -R "$GITHUB_REPOSITORY" --body "$msg" || true
             done

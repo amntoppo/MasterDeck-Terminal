@@ -1121,8 +1121,12 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   `build.yml` and on PRs only for packaging changes (`package.yml`, the `build` label), whisper-cli
   and md-mute cached, release tests before the builds, a smoke check after every publish
   (`release-smoke.mjs`), the release link on the PRs and tickets to Done (announce), the web app
-  deployed on merge (`web-deploy.yml`), the drift test wired for CI (`BACKEND_DEPLOY_KEY`). Branch
-  `worktree-178-ci-cd-fast-cycle`.
+  deployed on merge (`web-deploy.yml`), the drift test wired for CI (`BACKEND_DEPLOY_KEY`). PR #185
+  (0ae7f36). Its review comments, on branch `worktree-185-review-followups`: release tests on
+  macOS and Windows too, `ci-changes.mjs` taken from the base commit, the backend deploy key not
+  kept in the job, the web deploy running typecheck and vitest first with an exact wrangler, a
+  report that tells a live update from a failed publish, the TDD check's tests taking exactly 1 or
+  123.
 - **Watch any PR (#182)**: an eye on every open PR in the Pull requests view and its popup (filled:
   watched, with where events go), and **Watched PRs** with an **Add** field in the Review with
   Claude card. A manual watch goes to the session that owns the PR, else to the tab's review
