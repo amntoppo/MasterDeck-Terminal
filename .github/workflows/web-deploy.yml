@@ -60,16 +60,24 @@ jobs:
         if: env.HAS_CLOUDFLARE == 'true'
       - uses: ./.github/actions/setup-app
         if: env.HAS_CLOUDFLARE == 'true'
+      # main as merged, not the PR head that passed CI: two PRs green alone can break together.
+      - name: Typecheck and test
+        if: env.HAS_CLOUDFLARE == 'true'
+        working-directory: app
+        run: |
+          npm run typecheck
+          npm test
       - name: Build
         if: env.HAS_CLOUDFLARE == 'true'
         working-directory: app
         run: npm run build:web
         env:
           MD_API: https://dev.masterdeck.dev
+      # An exact wrangler (as deploy:web): what runs with the Cloudflare token never moves by itself.
       - name: Deploy
         if: env.HAS_CLOUDFLARE == 'true'
         working-directory: app
-        run: npx --yes wrangler@4 deploy -c web/wrangler.jsonc
+        run: npx --yes wrangler@4.147.0 deploy -c web/wrangler.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

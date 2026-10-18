@@ -34,7 +34,10 @@ jobs:
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then echo package=yes | tee -a "$GITHUB_OUTPUT"; exit 0; fi
           if [ "$ACTION" = labeled ] && [ "$LABEL" != build ]; then echo package=no | tee -a "$GITHUB_OUTPUT"; exit 0; fi
-          node app/scripts/ci-changes.mjs --base "$PR_BASE" --head "$PR_HEAD" --labels "$LABELS" | grep '^package=' | tee -a "$GITHUB_OUTPUT"
+          # The base's copy decides, as in ci.yml.
+          tool="$RUNNER_TEMP/ci-changes.mjs"
+          git show "$PR_BASE:app/scripts/ci-changes.mjs" > "$tool" 2>/dev/null || cp app/scripts/ci-changes.mjs "$tool"
+          node "$tool" --base "$PR_BASE" --head "$PR_HEAD" --labels "$LABELS" | grep '^package=' | tee -a "$GITHUB_OUTPUT"
         env:
           ACTION: ${{ github.event.action }}
           LABEL: ${{ github.event.label.name }}
