@@ -118,6 +118,7 @@ describe('prReviewBriefing', () => {
     const post = '/h/pr-review-guard/post-review-a.sh'
     const b = prReviewBriefing('alice', post)
     expect(b).toContain('[MasterDeck auto-review]')
+    expect(b).toContain('[MasterDeck PR watch]')
     // Bare, so the settings' prefix rule (`Bash(<post> --auto:*)`) matches it as typed.
     expect(b).toContain(`\n${post} --auto --pr`)
     expect(b).toMatch(/always a comment review: never approve, never request changes, never merge/)

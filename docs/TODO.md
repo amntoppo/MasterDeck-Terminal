@@ -577,6 +577,26 @@ fixes it, and move the item here to "Recently done".
 - **The briefing changed**: a running review session reads the new CLAUDE.md only after **New
   chat** (or a restart of the app, which rewrites it when the panel opens).
 
+## Watch any PR: open points (2026-10-18, issue #182)
+
+- **Not run against GitHub or a real Claude session.** The watch ran with a fake gh and a fake
+  review pane, the UI in the web preview. The first real eye click, the summary line in a real
+  review session and a review of new commits are the user's to see.
+- **The light read is heavier**: it now reads the title, head, decision, merge state and the
+  head's checks for every watched PR each minute (also `prStates`). Split it if GraphQL points
+  show.
+- **The phone and the API** do not see watches (not in `toRemoteSnapshot`).
+- **The target is not chosen by hand**: a PR with an owner always goes to it. A "send to the
+  review session instead" switch per watch if wanted.
+- **A watched track keeps the account it was queued with** when the tab later moves to another
+  account (Automate Review's own tracks are dropped then).
+- **Re-watching a PR at once after stopping it** replaces the ended watch, dropping a last line not
+  yet typed into its session ("stopped from MasterDeck"). Harmless today.
+- **A tab's account is taken from the caller** and only checked to be connected (as
+  `autoReviewSet` does), not to be the tab's own.
+- **On a phone** the eye is in the row's actions, past the table's sideways scroll, like the other
+  row buttons.
+
 ## Review with Claude: open points (2026-10-17, issue #149)
 
 - **Not run with a real Claude session or a real post.** Checked with a stand-in `claude` in the
@@ -1098,6 +1118,13 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   file, once each; per-PR status on the rows and in the panel, Retry, Cancel batch and a summary.
   Fixes the "only the last PR clicked was reviewed" bug. (branch
   `worktree-MasterDeck-Terminal-176-batch-review`)
+
+- **Watch any PR (#182)**: an eye on every open PR in the Pull requests view and its popup (filled:
+  watched, with where events go), and **Watched PRs** with an **Add** field in the Review with
+  Claude card. A manual watch goes to the session that owns the PR, else to the tab's review
+  session (summaries of comments, reviews of new commits, Needs you for ready / merged / closed).
+  Branch `worktree-182-watch-any-pr`; spec and plan in `docs/superpowers/{specs,plans}/2026-10-18-watch-any-pr*`.
+
 
 - **Rail icon order (#170)** (09c3650): drag or ⌥↑ / ⌥↓ to reorder the rail's icons, kept in
   `Settings.railOrder`; Reset icon order on the rail's menu and in Settings → General.

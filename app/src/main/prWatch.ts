@@ -8,6 +8,7 @@ import {
   BASELINE_AGE_MS, baselineMessage, fresh, HEAVY_EVERY_MS, HEAVY_MAX, heavyQuery, LIGHT_MAX, lightQuery, parseHeavy, parseLight, parseViewer, prItems, prWatchMessage, safeRef, type LightPr, type OwnCheck, type PrItem, type PrRef,
 } from '@shared/prWatch'
 import { canDeliver, pushEvents, type WatchEvent, type WatchInfo } from '@shared/watches'
+import { MANUAL_MAX, reviewWatchLine, watchReady, type PrWatchRow } from '@shared/watchPr'
 import type { AppState, CliResult, Session } from '@shared/types'
 import { ghErrorText, ghHasData, type GhRunner } from './ghc'
 
@@ -48,7 +49,32 @@ export interface PrWatchEntry {
   error?: string
   errorAt?: number
   okAt?: number
+  /** Started by the user (the eye, the Add field; #182), not by a session's own PR. Never ends because its author is not the account. */
+  manual?: true
+  /** The PR tab it was started from: its Review with Claude session takes the news while no session owns the PR. */
+  tabId?: string
+  tabName?: string
+  title?: string
+  /** The head commit last read (manual watches): a new one is new commits. */
+  head?: string
+  /** The head a "ready to merge" was told for. */
+  readyHead?: string
 }
+
+/** What a watch no session owns hands the PR tab's Review with Claude session (#182; main/autoReview.ts). */
+export interface WatchReview {
+  /** Type `text` into the tab's review session now (or start it with it); not ok: busy, try again later. */
+  say: (w: PrWatchEntry, text: string) => CliResult
+  /** New commits: the PR is reviewed for the tab, by Automate Review's rules. */
+  rereview: (w: PrWatchEntry) => void
+  /** Ready to merge (at `head`), merged, closed, or no longer readable: Needs you. */
+  notify: (w: PrWatchEntry, kind: 'ready' | 'merged' | 'closed' | 'gone', head?: string) => void
+  /** The watch ended: what Automate Review followed for it goes. */
+  stopped: (w: PrWatchEntry) => void
+}
+
+/** A manual watch no session owns: its news goes to its PR tab's review session. */
+const toReview = (w: PrWatchEntry): boolean => !!w.manual && !w.sessionKey && !!w.tabId
 
 export interface PrWatchDeps {
   gh: GhRunner
@@ -64,6 +90,8 @@ export interface PrWatchDeps {
    * when its transcript is not known. Absent: everything by the watch's account is the session's.
    */
   ownPost?: (sessionKey: string) => ((body: string) => boolean) | null
+  /** Where a watch no session owns sends its news (absent: nowhere, it is only shown). */
+  review?: WatchReview
 }
 
 const DONE_MAX = 500
@@ -177,7 +205,8 @@ export class PrWatch {
    * those whose text is in its transcript. Rebuilds `own` and `unchecked` for this read.
    */
   private ownCheck(w: PrWatchEntry): OwnCheck | undefined {
-    if (!this.deps.ownPost) return undefined
+    // The review session posts as the account and has no transcript here: all of the account's is its own.
+    if (!this.deps.ownPost || toReview(w)) return undefined
     // A watch from before #158 never had items by its account in `seen` (they were all dropped):
     // what is on the PR now is taken for the session's own, as a baseline, and only later ones count.
     const legacy = w.own === undefined
@@ -199,24 +228,109 @@ export class PrWatch {
     }
   }
 
-  private end(w: PrWatchEntry, line?: string): void {
+  private end(w: PrWatchEntry, line?: string, kind?: 'merged' | 'closed' | 'gone'): void {
     w.ended = true
     if (line) {
-      w.notes.push(line)
+      // No session to tell: Needs you says it (a stop from MasterDeck says nothing).
+      if (!toReview(w)) w.notes.push(line)
+      else if (kind) this.deps.review?.notify(w, kind)
       pushEvents((w.log ??= []), [{ at: Date.now(), kind: 'note', text: line }])
     }
     if (!this.done.includes(w.url)) this.done.push(w.url)
+    if (w.manual) this.deps.review?.stopped(w)
   }
 
-  sync(state: Pick<AppState, 'sessions' | 'sessionPrs' | 'prLive'>, on: (s: Session) => boolean, now = Date.now()): void {
+  /**
+   * A watch the user asked for (#182): `owner`, the session that owns the PR, if one does. One
+   * watch per PR: one already watching it is kept (reused). It starts quiet: what is on the PR now
+   * is not news.
+   */
+  start(
+    x: { url: string; owner: string; repo: string; number: number; tabId: string; tabName: string; account: string | null; title: string; head: string },
+    owner: Session | null,
+    now = Date.now(),
+  ): CliResult & { reused?: boolean } {
+    if (!this.loaded) return { ok: false, message: 'MasterDeck is still reading its PR watches: try again in a moment' }
+    if (!safeRef(x)) return { ok: false, message: 'Not a PR' }
+    if (this.list.some((w) => w.url === x.url && !w.ended)) return { ok: true, reused: true, message: 'Already watched' }
+    if (this.list.filter((w) => w.manual && !w.ended).length >= MANUAL_MAX) return { ok: false, message: `At most ${MANUAL_MAX} PRs can be watched by hand` }
+    // An ended watch still holding its last lines is replaced; a stop is undone.
+    this.list = this.list.filter((w) => w.url !== x.url)
+    this.done = this.done.filter((u) => u !== x.url)
+    this.list.push({
+      url: x.url, owner: x.owner, repo: x.repo, number: x.number, sessionKey: owner?.key ?? '', ...(x.account ? { account: x.account } : {}),
+      manual: true, tabId: x.tabId, tabName: x.tabName.slice(0, 100), title: x.title.slice(0, 300), ...(x.head ? { head: x.head } : {}),
+      startedAt: now, baseline: false, quiet: true, log: [{ at: now, kind: 'note', text: 'watch started from MasterDeck' }],
+      seen: [], own: [], updatedAt: null, mergeable: null, heavyAt: 0, stallAt: null, nudges: 0, pending: [], notes: [], events: 0, lastEventAt: null, ended: false,
+    })
+    this.save()
+    this.deps.onChange()
+    return { ok: true, message: 'Watching' }
+  }
+
+  /**
+   * A PR tab was closed: the manual watches it sent to its review session end (nowhere is left to
+   * send them); those a session owns go on, with no tab to fall back to.
+   */
+  forgetTab(tabId: string): void {
+    let changed = false
+    for (const w of this.list) {
+      if (!w.manual || w.tabId !== tabId || w.ended) continue
+      if (!w.sessionKey) this.end(w)
+      delete w.tabId
+      changed = true
+    }
+    if (!changed) return
+    this.list = this.list.filter((w) => !(w.ended && !w.pending.length && !w.notes.length))
+    this.save()
+    this.deps.onChange()
+  }
+
+  /** New commits and "ready to merge" for a manual watch, from the light read (told only when no session owns it). */
+  private lightNews(w: PrWatchEntry, l: LightPr, now: number): void {
+    const was = w.head
+    if (l.title) w.title = l.title.slice(0, 300)
+    if (l.head) w.head = l.head
+    if (!toReview(w) || l.state !== 'OPEN') return
+    const log = (text: string) => {
+      pushEvents((w.log ??= []), [{ at: now, kind: 'note', text }])
+      w.events += 1
+      w.lastEventAt = now
+    }
+    if (was && l.head && l.head !== was) {
+      log(`new commits (${l.head.slice(0, 7)}): sent for review`)
+      this.deps.review?.rereview(w)
+    }
+    if (watchReady(l) && w.readyHead !== l.head) {
+      w.readyHead = l.head
+      log('ready to merge')
+      this.deps.review?.notify(w, 'ready', l.head)
+    }
+  }
+
+  /** `owner`: the session that owns a PR now (a manual watch's news goes there while one does). */
+  sync(state: Pick<AppState, 'sessions' | 'sessionPrs' | 'prLive'>, on: (s: Session) => boolean, now = Date.now(), owner?: (url: string) => Session | null): void {
     if (!this.loaded) return
     let changed = false
+    for (const w of this.list) {
+      if (!w.manual || w.ended || w.sessionKey) continue
+      const s = owner?.(w.url)
+      if (s && s.state !== 'done' && s.name !== MASTER_NAME) {
+        w.sessionKey = s.key
+        // The review session's posts were its own; the session's are told apart from now on, so what
+        // the account has on the PR now is taken for its own once (the baseline path of ownCheck).
+        delete w.own
+        // The session works on the PR now: the tab's review session stops reviewing its pushes.
+        this.deps.review?.stopped(w)
+        changed = true
+      }
+    }
     for (const s of state.sessions) {
       if (s.state === 'done' || s.name === MASTER_NAME) continue
       if (!on(s)) {
-        // Turned off (setting or workflow): its watches go without a word.
+        // Turned off (setting or workflow): its watches go without a word (the user's own stay).
         const before = this.list.length
-        this.list = this.list.filter((w) => w.sessionKey !== s.key)
+        this.list = this.list.filter((w) => w.sessionKey !== s.key || w.manual)
         changed ||= this.list.length !== before
         continue
       }
@@ -227,7 +341,7 @@ export class PrWatch {
         const have = this.list.find((w) => w.url === url)
         if (have) {
           // The session gained (or changed) its account after the watch began: read it as that account.
-          if (s.account && have.sessionKey === s.key && have.account !== s.account) {
+          if (s.account && have.sessionKey === s.key && have.account !== s.account && !have.manual) {
             have.account = s.account
             changed = true
           }
@@ -279,11 +393,13 @@ export class PrWatch {
             if (!l) {
               this.failed([w], readError(r, viewer), now)
               w.misses = (w.misses ?? 0) + 1
-              if (w.misses >= MISS_MAX) this.end(w, `[MasterDeck PR watch] ${w.repo}#${w.number}: MasterDeck can't read this PR any more (${MISS_MAX} tries). The PR watch has ended.`)
+              if (w.misses >= MISS_MAX) this.end(w, `[MasterDeck PR watch] ${w.repo}#${w.number}: MasterDeck can't read this PR any more (${MISS_MAX} tries). The PR watch has ended.`, 'gone')
               return
             }
             w.misses = 0
-            if (l.author && l.author.toLowerCase() !== viewer.toLowerCase()) return this.end(w)
+            // A session's watch is for its own PRs; one the user asked for watches anyone's.
+            if (!w.manual && l.author && l.author.toLowerCase() !== viewer.toLowerCase()) return this.end(w)
+            if (w.manual) this.lightNews(w, l, now)
             const conflictKnown = w.seen.some((k) => k.startsWith('X:'))
             const due =
               w.heavyAt === 0 || l.updatedAt !== w.updatedAt || now - w.heavyAt >= HEAVY_EVERY_MS || (w.stallAt !== null && now >= w.stallAt) ||
@@ -337,7 +453,7 @@ export class PrWatch {
               w.lastEventAt = now
             }
             if (ending) {
-              this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text)
+              this.end(w, quiet ? undefined : prWatchMessage(w, items, w.nudges).text, h.state === 'MERGED' ? 'merged' : 'closed')
               this.deps.ended?.(w.url)
             }
           })
@@ -355,11 +471,17 @@ export class PrWatch {
     const byKey = new Map<string, PrWatchEntry[]>()
     for (const w of this.list) (byKey.get(w.sessionKey) ?? byKey.set(w.sessionKey, []).get(w.sessionKey)!).push(w)
     for (const [key, ws] of byKey) {
+      if (!key) {
+        this.deliverReview(ws)
+        continue
+      }
       const s = sessions.find((x) => x.key === key)
       if (s) this.missingSince.delete(key)
       else if (!this.missingSince.has(key)) this.missingSince.set(key, now)
       const gone = s ? s.state === 'done' : now - (this.missingSince.get(key) ?? now) > 120_000
       if (gone) {
+        // A manual watch outlives its session: from now on its news goes to its tab's review session.
+        for (const w of ws) if (w.manual && w.tabId && !w.ended) w.sessionKey = ''
         this.list = this.list.filter((w) => w.sessionKey !== key)
         this.missingSince.delete(key)
         this.save()
@@ -410,6 +532,59 @@ export class PrWatch {
         .catch(() => {})
         .finally(() => this.sending.delete(key))
     }
+  }
+
+  /**
+   * A tab's review session takes the news of the watches no session owns: one line per PR,
+   * once its turn is over (`review.say` says when). Session-worded lines (ends, a stop) are not
+   * typed there: the ends went to Needs you.
+   */
+  private deliverReview(ws: PrWatchEntry[]): void {
+    let changed = false
+    for (const w of ws) {
+      if (w.notes.length) {
+        w.notes = []
+        changed = true
+      }
+      if (w.ended || !w.tabId) {
+        this.list = this.list.filter((x) => x !== w)
+        changed = true
+        continue
+      }
+      if (!w.pending.length || !this.deps.review) continue
+      const text = reviewWatchLine(w, w.title ?? '', w.pending)
+      if (text && !this.deps.review.say(w, text).ok) continue
+      w.pending = []
+      changed = true
+    }
+    if (changed) {
+      this.save()
+      this.deps.onChange()
+    }
+  }
+
+  /** Every watch, as the window shows it (the eye, the Watched PRs list). */
+  rows(sessions: Session[]): PrWatchRow[] {
+    return this.list
+      .filter((w) => !w.ended)
+      .map((w) => {
+        const s = w.sessionKey ? sessions.find((x) => x.key === w.sessionKey) : undefined
+        const last = w.log?.length ? w.log[w.log.length - 1] : null
+        return {
+          url: w.url,
+          repo: `${w.owner}/${w.repo}`,
+          number: w.number,
+          title: (w.title ?? '').slice(0, 200),
+          manual: !!w.manual,
+          tabId: w.tabId ?? null,
+          tabName: w.tabName ?? null,
+          account: w.account ?? null,
+          target: s ? { session: { key: s.key, name: s.name } } : toReview(w) ? { review: w.tabId! } : null,
+          lastEvent: last ? { at: last.at, text: last.text.slice(0, 200) } : w.lastEventAt ? { at: w.lastEventAt, text: '' } : null,
+          startedAt: w.startedAt,
+          error: w.error ?? null,
+        }
+      })
   }
 
   info(sessions: Session[]): WatchInfo[] {

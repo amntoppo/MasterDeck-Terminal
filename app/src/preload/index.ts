@@ -131,6 +131,7 @@ const api: DeckApi = {
   reviewBatchAdd: (req) => ipcRenderer.invoke(CH.reviewBatchAdd, req),
   reviewBatchCancel: (tabId, forget) => ipcRenderer.invoke(CH.reviewBatchCancel, tabId, forget),
   reviewBatchRetry: (tabId, url) => ipcRenderer.invoke(CH.reviewBatchRetry, tabId, url),
+  prWatchSet: (req) => ipcRenderer.invoke(CH.prWatchSet, req),
   onTicketsCreated: (cb) => listen(CH.ticketsCreated, cb),
   ticketCreate: (req) => ipcRenderer.invoke(CH.ticketCreate, req),
   ticketRepoMeta: (repo) => ipcRenderer.invoke(CH.ticketRepoMeta, repo),

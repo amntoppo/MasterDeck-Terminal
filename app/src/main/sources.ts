@@ -72,6 +72,7 @@ import { isTicketBuilderSession } from "./ticketDirs";
 import { isPrReviewSession } from "./prReviewDirs";
 import type { AutoReviewView } from "@shared/autoReview";
 import type { BatchView } from "@shared/reviewBatch";
+import type { PrWatchRow } from "@shared/watchPr";
 import {
   newFlowTrack,
   scanFlowLines,
@@ -1089,6 +1090,10 @@ export class Sources {
   }
   setWatchInfo(f: () => WatchInfo[]): void {
     this.watchInfo = f;
+  }
+  private prWatches: (sessions: Session[]) => PrWatchRow[] = () => [];
+  setPrWatches(f: (sessions: Session[]) => PrWatchRow[]): void {
+    this.prWatches = f;
   }
   /** Told of every settings change (the hook's monitors-by file follows it). */
   onSettings: (s: Settings) => void = () => {};
@@ -2590,6 +2595,7 @@ export class Sources {
       sessionPrs,
       peers: this.peerStore ? adjacency(this.peerStore.data()) : {},
       watches: this.watchInfo(),
+      prWatches: this.prWatches(sessions),
       autoReview: this.autoReview(),
       reviewBatch: this.reviewBatch(),
       schedules: Object.fromEntries(

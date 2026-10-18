@@ -14,6 +14,7 @@ import { App } from '@renderer/App'
 import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
 import { BUILTIN_WORKFLOWS } from '@shared/builtinWorkflows'
+import { parsePrInput } from '@shared/watchPr'
 import { fakeScreen, fixtureCosts, fixtureState, SESSIONS } from './fixture'
 import { localZone, normalizeSchedule, schedView, type Schedule, type SchedRun } from '@shared/sched'
 
@@ -256,6 +257,21 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
       if (sw.review) tabs[tabId] = { review: true, merge: sw.merge, lastCheck: Date.now(), error: null, pane: null }
       else delete tabs[tabId]
       state.autoReview = { tabs, prs: state.autoReview?.prs ?? [] }
+      for (const cb of stateCbs) cb({ ...state })
+      return ok
+    },
+    // The eye and Watched PRs (#182), in memory: a link or number of acme/web, refused when unknown or watched.
+    prWatchSet: (req: { pr: string; on: boolean; tabId: string; tabName: string }) => {
+      const p = parsePrInput(req.pr, 'acme/web')
+      if ('error' in p) return { ok: false, message: p.error }
+      const rows = state.prWatches ?? []
+      if (!req.on) state.prWatches = rows.filter((r) => r.url !== p.url)
+      else if (rows.some((r) => r.url === p.url)) return { ok: true, reused: true, message: 'Already watched' }
+      else {
+        const pr = state.teamPrs.find((x) => x.url === p.url)
+        if (!pr) return { ok: false, message: `No PR #${p.ref.number} in ${p.ref.owner}/${p.ref.repo}` }
+        state.prWatches = [...rows, { url: p.url, repo: pr.repo, number: pr.number, title: pr.title, manual: true, tabId: req.tabId, tabName: req.tabName, account: null, target: { review: req.tabId }, lastEvent: { at: Date.now(), text: 'watch started from MasterDeck' }, startedAt: Date.now(), error: null }]
+      }
       for (const cb of stateCbs) cb({ ...state })
       return ok
     },

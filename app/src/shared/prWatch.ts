@@ -26,7 +26,8 @@ const OWNER = /^[A-Za-z0-9-]{1,39}$/
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
 export const safeRef = (r: PrRef): boolean => OWNER.test(r.owner) && NAME.test(r.repo) && Number.isInteger(r.number) && r.number > 0
 
-const LIGHT = 'state isDraft mergeable baseRefName updatedAt createdAt author{login}'
+// title, the head and its checks, the decision and merge state: a watch no session owns (#182) tells new commits and "ready to merge".
+const LIGHT = 'state isDraft mergeable baseRefName updatedAt createdAt author{login} title headRefOid reviewDecision mergeStateStatus commits(last:1){nodes{commit{statusCheckRollup{state}}}}'
 const NOTE = 'databaseId updatedAt author{login} body'
 // ponytail: windows are the newest threads (last:100), comments (last:30) and reviews (last:30); anything
 // older than the window is not seen. Page backwards if a PR outgrows them.
@@ -47,6 +48,14 @@ export interface LightPr {
   updatedAt: string
   createdAt: string
   author: string | null
+  title: string
+  head: string
+  /** APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, '' (none). */
+  decision: string
+  /** CLEAN, BLOCKED, BEHIND, ... ('' unknown). */
+  mergeState: string
+  /** The head commit's check rollup; null: no checks. */
+  checks: string | null
 }
 export interface Note {
   id: number
@@ -80,7 +89,11 @@ function pulls(text: string, n: number): (J | null)[] {
 }
 
 function light(p: J): LightPr {
-  return { state: s(p.state), isDraft: p.isDraft === true, mergeable: s(p.mergeable), baseRefName: s(p.baseRefName), updatedAt: s(p.updatedAt), createdAt: s(p.createdAt), author: s(o(p.author).login) || null }
+  const rollup = o(o(nodes(p.commits)[0]?.commit).statusCheckRollup)
+  return {
+    state: s(p.state), isDraft: p.isDraft === true, mergeable: s(p.mergeable), baseRefName: s(p.baseRefName), updatedAt: s(p.updatedAt), createdAt: s(p.createdAt), author: s(o(p.author).login) || null,
+    title: s(p.title), head: s(p.headRefOid), decision: s(p.reviewDecision), mergeState: s(p.mergeStateStatus), checks: s(rollup.state) || null,
+  }
 }
 const note = (c: J, at = 'updatedAt'): Note => ({ id: typeof c.databaseId === 'number' ? c.databaseId : 0, updatedAt: s(c[at]), author: login(c.author), body: s(c.body) })
 

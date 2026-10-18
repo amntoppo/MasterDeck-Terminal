@@ -134,6 +134,8 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   reviewBatchAdd: invoke(CH.reviewBatchAdd),
   reviewBatchCancel: invoke(CH.reviewBatchCancel),
   reviewBatchRetry: invoke(CH.reviewBatchRetry),
+  // The eye and Watched PRs (#182): main checks the tab, the account and the PR; the browser asked before stopping.
+  prWatchSet: invoke(CH.prWatchSet),
   onTicketsCreated: { kind: "event", ch: CH.ticketsCreated },
   ticketRepoMeta: invoke(CH.ticketRepoMeta),
   workspaceRepos: invoke(CH.workspaceRepos),

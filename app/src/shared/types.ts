@@ -247,6 +247,8 @@ export interface AppState {
   autoReview?: import("./autoReview").AutoReviewView;
   /** Review selected per PR tab (#176; main/reviewBatch.ts): each ticked PR and its status. */
   reviewBatch?: import("./reviewBatch").BatchView;
+  /** Every PR watch, automatic or the user's own (#182; main/prWatch.ts `rows`): the eye and Watched PRs. */
+  prWatches?: import("./watchPr").PrWatchRow[];
   /**
    * Sessions a schedule started (#140), by session key (the bg id): the session list's chip. Set in
    * the state callback from the Scheduler; runs of the last 30 days. Not in toRemoteSnapshot.

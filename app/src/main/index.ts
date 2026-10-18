@@ -165,7 +165,7 @@ import {
   shiftQueue,
   unshiftQueue,
 } from "./queue";
-import { makeGhRunner, readGhCacheStatus } from "./ghc";
+import { ghErrorText, ghHasData, makeGhRunner, readGhCacheStatus } from "./ghc";
 import { GitHub } from "./github";
 import { accountClients } from "./accountClients";
 import { AssignableUsers } from "./assignUsers";
@@ -214,7 +214,9 @@ import {
   type MonitorDef,
 } from "@shared/flow";
 import { builtinById } from "@shared/builtinWorkflows";
-import { ticketContext } from "@shared/ticketBuilder";
+import { TICKET_TAB, ticketContext } from "@shared/ticketBuilder";
+import { lightQuery, parseLight } from "@shared/prWatch";
+import { parsePrInput, primaryRepoOf, watchNoticeText, watchOwner, watchReadError } from "@shared/watchPr";
 import { shellQuote } from "@shared/workflow";
 import { flowActions, type WatchState } from "@shared/flowWatch";
 import { commandEvents, flowProgress, type FlowEvent } from "@shared/flowTrack";
@@ -848,7 +850,18 @@ const prWatch = new PrWatch(join(paths.home, "pr-watch.json"), {
   onChange: () => sources.changed(),
   ended: (url) => void sources.prEnded(url).catch(() => {}),
   ownPost: (key) => sources.ownPost(key),
+  // A watch no session owns (#182): its PR tab's Review with Claude session, through Automate Review.
+  review: {
+    say: (w, text) => autoReview.say(watchTab(w), text),
+    rereview: (w) => autoReview.rereview(watchTab(w), w.url),
+    notify: (w, kind, head) => autoReview.watchNotice(watchTab(w), w.url, watchNoticeText(w, w.title ?? "", kind), head),
+    stopped: (w) => autoReview.unwatch(w.account ?? null, w.url),
+  },
 });
+/** The PR tab a manual watch was started from, as Automate Review knows tabs. */
+function watchTab(w: { tabId?: string; tabName?: string; account?: string }) {
+  return { tabId: w.tabId ?? "", name: w.tabName ?? "PRs", account: w.account ?? null };
+}
 // Monitors MasterDeck runs for sessions (Settings → Monitors run by: MasterDeck).
 const watches = new Watches(
   join(paths.home, "watches.json"),
@@ -1139,6 +1152,8 @@ const sources = new Sources(
         (s) =>
           state.settings.watchPrs &&
           workflows().builtinsFor(s.sessionId).includes("pr-watch"),
+        Date.now(),
+        (url) => watchOwner(url, state),
       );
     } catch (e) {
       console.error(`PR watch: ${String(e)}`);
@@ -3098,6 +3113,7 @@ function registerIpc(): void {
     if (o.forget === true && typeof tabId === "string") {
       if (isRemote(e)) return { ok: true, message: "kept" };
       autoReview.forget(tabId);
+      prWatch.forgetTab(tabId);
       return { ok: true, message: "forgotten" };
     }
     const cfg = getConfig();
@@ -3132,6 +3148,50 @@ function registerIpc(): void {
   // A browser cancels a batch, never forgets a tab (its tabs are its own, with the window's ids).
   reg.handle(CH.reviewBatchCancel, (e, tabId: unknown, forget: unknown) => reviewBatch.cancel(tabId, forget === true && !isRemote(e)));
   reg.handle(CH.reviewBatchRetry, (_e, tabId: unknown, url: unknown) => reviewBatch.retry(tabId, url));
+  // Watch any PR (#182): the eye and the Watched PRs list, for a PR tab, as its account. A browser
+  // asked with webConfirm before stopping a session's own watch; the window asks here.
+  reg.handle(CH.prWatchSet, async (e, raw: unknown) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    if (typeof o.tabId !== "string" || !TICKET_TAB.test(o.tabId)) return { ok: false, message: "refusing a watch for a bad PR tab" };
+    const tabId = o.tabId;
+    const tabName = typeof o.tabName === "string" && o.tabName.trim() ? o.tabName.slice(0, 100) : "PRs";
+    const cfg = getConfig();
+    let account: string | null = null;
+    if (isMulti(cfg)) {
+      const want = typeof o.account === "string" ? o.account.toLowerCase() : "";
+      account = cfg.accounts.find((a) => a.login.toLowerCase() === want)?.login ?? null;
+      if (!account) return { ok: false, message: "refusing a watch as an account that is not connected" };
+    }
+    const acct = cfg.accounts.find((a) => a.login === account) ?? cfg.accounts.find((a) => a.primary);
+    const primary = primaryRepoOf(typeof o.repo === "string" ? o.repo : "", acct?.owner || cfg.owner, acct?.issueRepo || cfg.issueRepo);
+    const p = parsePrInput(typeof o.pr === "string" ? o.pr.slice(0, 500) : "", primary);
+    if ("error" in p) return { ok: false, message: p.error };
+    const rows = prWatch.rows(latest?.sessions ?? []);
+    const row = rows.find((r) => r.url === p.url);
+    if (o.on !== true) {
+      if (!row) return { ok: true, message: "Not watched" };
+      if (!row.manual && !isRemote(e)) {
+        const choice = await dialog.showMessageBox(win!, {
+          type: "warning",
+          buttons: ["Cancel", "Stop watching"],
+          defaultId: 0,
+          cancelId: 0,
+          message: `Stop watching ${row.repo}#${row.number}?`,
+          detail: "MasterDeck watches it for its session. The session won't hear about new comments, reviews or conflicts on it, and the watch won't start again by itself.",
+        });
+        if (choice.response !== 1) return { ok: false, message: "cancelled" };
+      }
+      return prWatch.stop(`pr:${p.url}`) ? { ok: true, message: "Stopped" } : { ok: false, message: "Not watched" };
+    }
+    if (row) return { ok: true, reused: true, message: "Already watched" };
+    // One read of the PR as the tab's account, past the cache: it exists, the account can read it, it is open.
+    const r = await forAccount(account).gh(["api", "graphql", "-f", `query=${lightQuery([p.ref])}`], { force: true, timeoutMs: 30_000 });
+    const l = ghHasData(r) ? parseLight(r.stdout, 1)[0] : null;
+    if (!l) return { ok: false, message: watchReadError(ghErrorText(r) || r.stderr, p.ref) };
+    if (l.state !== "OPEN") return { ok: false, message: `${p.ref.owner}/${p.ref.repo}#${p.ref.number} is ${l.state.toLowerCase() || "not open"}: nothing to watch` };
+    const st = latest;
+    return prWatch.start({ url: p.url, ...p.ref, tabId, tabName, account, title: l.title, head: l.head }, st ? watchOwner(p.url, st) : null);
+  });
   // Labels, milestones and people who can be assigned in a repo (the New ticket dialog), cached a while.
   reg.handle(CH.ticketRepoMeta, async (_e, repo: unknown) => {
     if (
@@ -4809,6 +4869,7 @@ app.whenReady().then(async () => {
     ...prWatch.info(latest?.sessions ?? []),
     ...autoReview.info(),
   ]);
+  sources.setPrWatches((sessions) => prWatch.rows(sessions));
   prWatch.load();
   autoReview.load();
   sources.setAutoReview(() => autoReview.view());

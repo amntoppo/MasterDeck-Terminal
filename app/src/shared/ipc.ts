@@ -299,6 +299,7 @@ export const CH = {
   reviewBatchAdd: "pr:reviewBatchAdd",
   reviewBatchCancel: "pr:reviewBatchCancel",
   reviewBatchRetry: "pr:reviewBatchRetry",
+  prWatchSet: "prWatch:set",
   ticketsCreated: "ticket:created",
   ticketRepoMeta: "ticket:repoMeta",
   startClaude: "session:startClaude",
@@ -660,6 +661,13 @@ export interface DeckApi {
   reviewBatchCancel(tabId: string, forget?: boolean): Promise<CliResult>;
   /** Retry one PR of the batch (failed, skipped or cancelled); `prompt`: the line to type. */
   reviewBatchRetry(tabId: string, url: string): Promise<CliResult & { prompt?: string }>;
+  /**
+   * Watch a PR, or stop watching it (#182), for a PR tab, as its account. `pr`: a link,
+   * `owner/repo#123`, or `#123` / `123` in the tab's primary repository (its Repo filter `repo`,
+   * else the account's issue repository). Starting validates the PR on GitHub; a PR already
+   * watched keeps its watch (`reused`). Stopping a watch a session's own PR started asks first.
+   */
+  prWatchSet(req: { pr: string; on: boolean; tabId: string; tabName: string; account?: string; repo?: string }): Promise<CliResult & { reused?: boolean }>;
   /** Tickets the Board's session created. */
   onTicketsCreated(
     cb: (t: { url: string; number: number }[]) => void,

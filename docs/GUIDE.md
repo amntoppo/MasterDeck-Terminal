@@ -1009,6 +1009,13 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
       never bypassed, and a failed merge is not tried again for the same commit. A browser can turn
       it off, not on.
     - Closing the tab or changing its account switches both off.
+  - **Watched PRs (#182):** ▴ on the card also lists the PRs MasterDeck watches for the tab: the
+    ones you watch from it, and your sessions' own PRs (of the tab's account). Each row shows the
+    PR, its title, where its events go, what it last saw and when, and **×** to stop watching it.
+    **Add** takes a PR link (`https://github.com/owner/repo/pull/123`), `owner/repo#123`, or `#123`
+    / `123` in the tab's repository (its Repo filter, else the account's issue repository). It reads
+    the PR as the tab's account first and says what is wrong in the card: not a PR, not found or no
+    access, no such PR, merged or closed, already watched.
   - **Review selected (#176):** tick several PRs and have Claude review them all at once. Each open
     PR has a checkbox; **⌘-click** (Ctrl-click) a row to tick it, **Shift-click** to tick every open
     row from the last one ticked, or tick the header box for every open PR shown. A plain click
@@ -1026,6 +1033,26 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
       (no changes since the last review)".
     - Ticking or picking other PRs while a batch runs changes nothing in it; **Review selected**
       again adds the new ones. The script posts only to the PRs of the batch, once each.
+- **The eye (#182):** each open PR (row and PR popup) has an eye: filled when MasterDeck watches it,
+  dimmed when not. Its tooltip says where the events go ("Watched: events go to session
+  login-redirect", "… to this tab's Review with Claude session", "Not watched: click to watch").
+  Click it to watch the PR or stop watching it, as the PR tab's account. One watch per PR: a PR
+  already watched keeps its watch. A session's own PR (watched automatically) shows the eye filled;
+  turning it off asks first, and that PR is not watched again by itself. A watch you start:
+  - starts quiet: what is on the PR already is not news;
+  - goes to the session that owns the PR (made it, or works on the issue it closes), as a session's
+    own watch does, with the same delivery rules; the owner can come later, and when it ends the
+    watch falls back to the tab's review session;
+  - with no such session, goes to the tab's **Review with Claude** session (started if none runs):
+    new comments, reviews, review threads and a merge conflict are typed there as one line asking
+    Claude to summarise them (it never replies, pushes or merges for them); new commits are
+    reviewed as Automate Review does, also while Automate Review is off (Merge automatically still
+    merges only what the tab reviewed, with the switch on); "ready to merge", "merged", "closed"
+    and "can't read it any more" go to Needs you (**Automated review** in Settings → Notifications);
+  - ends by itself when the PR is merged or closed (the eye turns off), is kept across restarts
+    (`pr-watch.json`), shows in the session's Details → GitHub → Monitors when a session owns it,
+    and works the same in the web app. Closing the PR tab ends the watches it sent to its review
+    session.
 - **Fix CI / Address comments:** sent to the owning session in master's wording. With no session, the
   Start dialog opens with that instruction filled in.
 - **Auto-babysit:** failing CI or review feedback on my PRs appear as offers, in Needs you and at

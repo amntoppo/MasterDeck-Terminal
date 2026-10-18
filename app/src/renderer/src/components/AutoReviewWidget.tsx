@@ -1,11 +1,14 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { autoStatusLine, STATUS_TEXT } from '@shared/autoReview'
 import type { PrFilters } from '@shared/teamPrs'
 import type { AppState } from '@shared/types'
 import type { WatchEvent } from '@shared/watches'
+import { isMulti, primaryLogin } from '@shared/accounts'
+import { targetText, type PrWatchRow } from '@shared/watchPr'
 import { deck, useNow } from '../deck'
 import { formatAgo } from '@shared/format'
+import { setWatch, type WatchTabRef } from './WatchEye'
 
 interface Props {
   state: AppState
@@ -39,12 +42,22 @@ export function AutoReviewWidget({ state, tabId, tab, account, style, inline }: 
   const [msg, setMsg] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
   const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  // The details open above the widget, or below it when the input box sits too high for them (capped to the room).
+  const place = (): CSSProperties | undefined => {
+    const r = root.current?.getBoundingClientRect()
+    if (inline || !r) return undefined
+    const above = r.top - 8
+    return above >= 260 ? { maxHeight: Math.min(above, window.innerHeight * 0.5) } : { top: 'calc(100% + 4px)', bottom: 'auto', maxHeight: Math.max(160, window.innerHeight - r.bottom - 8) }
+  }
+  const watchTab: WatchTabRef = { tabId, tabName: tab.name, ...(account ? { account } : {}), ...(tab.filters.repo ? { repo: tab.filters.repo } : {}) }
+  const watched = watchedFor(state, tabId, account)
   const set = async (r: boolean, m: boolean) => {
     const res = await deck().autoReviewSet(tabId, { review: r, merge: r && m, name: tab.name, ...(account ? { account } : {}), filters: tab.filters })
     setMsg(res.ok ? null : res.message)
   }
   return (
-    <div className={`auto-widget${inline ? ' inline' : ''}`} style={style} aria-label="Automation">
+    <div ref={root} className={`auto-widget${inline ? ' inline' : ''}`} style={style} aria-label="Automation">
       <div className="auto-row">
         <label className="auto-sw" title="Review every PR whose review is asked of you, and post the comments">
           <button className={`switch ${review ? 'on' : ''}`} role="switch" aria-checked={review} aria-label="Automate Review" onClick={() => void set(!review, false)} />
@@ -67,10 +80,12 @@ export function AutoReviewWidget({ state, tabId, tab, account, style, inline }: 
       </div>
       <div className={`auto-status small ${msg || t?.error ? 'bad' : 'muted'}`} title={msg ?? t?.error ?? undefined}>
         {msg ?? autoStatusLine(t, prs, tabId, now)}
+        {!msg && watched.length > 0 && ` · ${watched.length} PR${watched.length === 1 ? '' : 's'} watched`}
       </div>
       {open && (
-        <div className="auto-more">
+        <div className="auto-more" style={place()}>
           {review ? <MonitorRow id={`review:${tabId}`} state={state} now={now} /> : <div className="muted small">No monitor: Automate Review is off.</div>}
+          <WatchedPrs rows={watched} tab={watchTab} now={now} />
           {prs.length > 0 && (
             <ul className="auto-prs">
               {prs.map((p) => (
@@ -117,6 +132,115 @@ export function AutoReviewWidget({ state, tabId, tab, account, style, inline }: 
           document.body,
         )}
     </div>
+  )
+}
+
+/**
+ * The watches a PR tab lists (#182): those started from it, and every session's own watch of its
+ * account (two or more accounts: the tab's; one: all of them).
+ */
+function watchedFor(state: AppState, tabId: string, account: string | undefined): PrWatchRow[] {
+  const primary = primaryLogin(state.config)
+  return (state.prWatches ?? []).filter((r) =>
+    r.manual ? r.tabId === tabId : !isMulti(state.config) || (r.account ?? primary)?.toLowerCase() === (account ?? primary)?.toLowerCase(),
+  )
+}
+
+/** Watched PRs (#182): add one by link or number, see where its events go and what it last saw, remove it. */
+function WatchedPrs({ rows, tab, now }: { rows: PrWatchRow[]; tab: WatchTabRef; now: number }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const add = async () => {
+    if (busy || !text.trim()) return
+    setBusy(true)
+    const r = await deck()
+      .prWatchSet({ pr: text, on: true, tabId: tab.tabId, tabName: tab.tabName, ...(tab.account ? { account: tab.account } : {}), ...(tab.repo ? { repo: tab.repo } : {}) })
+      .catch((e: unknown) => ({ ok: false, message: String(e), reused: false }))
+    setBusy(false)
+    // Already watched: the existing watch is kept, and said so like an error (nothing new started).
+    if (r.ok && !r.reused) {
+      setText('')
+      setError(null)
+    } else setError(r.reused ? 'Already watched' : r.message)
+  }
+  return (
+    <div className="watched-prs">
+      <div className="watched-head small">
+        <b>Watched PRs</b>
+        <span className="muted"> · MasterDeck tells their session, or this review session, what happens on them</span>
+      </div>
+      <form
+        className="watched-add"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void add()
+        }}
+      >
+        <input
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value)
+            setError(null)
+          }}
+          placeholder="PR link, owner/repo#123 or #123"
+          aria-label="PR to watch"
+          aria-invalid={!!error}
+          spellCheck={false}
+        />
+        <button className="btn" type="submit" disabled={busy || !text.trim()}>
+          {busy ? 'Checking…' : 'Add'}
+        </button>
+      </form>
+      {error && (
+        <div className="bad small" role="alert">
+          {error}
+        </div>
+      )}
+      {rows.length === 0 ? (
+        <div className="muted small">None yet: click the eye on a PR, or add one here.</div>
+      ) : (
+        <ul className="watched-list">
+          {rows.map((r) => (
+            <WatchedRow key={r.url} r={r} tab={tab} now={now} onError={setError} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function WatchedRow({ r, tab, now, onError }: { r: PrWatchRow; tab: WatchTabRef; now: number; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <li>
+      <div className="watched-line">
+        <button className="link-btn" onClick={() => deck().openExternal(r.url)} title={r.url}>
+          {r.repo}#{r.number}
+        </button>
+        <span className="watched-title" title={r.title}>
+          {r.title}
+        </span>
+        <button
+          className="link-btn watched-x"
+          disabled={busy}
+          aria-label={`Stop watching ${r.repo}#${r.number}`}
+          title="Stop watching"
+          onClick={async () => {
+            setBusy(true)
+            onError(await setWatch(r.url, false, tab, r).catch((e: unknown) => String(e)))
+            setBusy(false)
+          }}
+        >
+          ×
+        </button>
+      </div>
+      <div className="muted small">
+        {r.manual ? 'Events go to ' : 'Its session’s own · events go to '}
+        {targetText(r, tab.tabId)}
+        {r.error ? <span className="bad"> · can't read it: {r.error}</span> : r.lastEvent ? ` · ${r.lastEvent.text || 'last event'} ${formatAgo(now - r.lastEvent.at)} ago` : ' · nothing yet'}
+      </div>
+    </li>
   )
 }
 
