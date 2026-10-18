@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { prReviewBriefing, type PrReviewContext } from '@shared/prReview'
 import { DEFAULT_PR_FILTERS } from '@shared/teamPrs'
-import { isPrReviewSession, prReviewDir, prReviewGuard, prReviewPost, prReviewDirOk, prReviewFolderAccount, prReviewPane, prReviewSettings, prReviewTurn, writePrReviewAuto, writePrReviewContext, writePrReviewDir, writePrReviewFiles } from './prReviewDirs'
+import { parseLogLines } from '@shared/reviewBatch'
+import { isPrReviewSession, prReviewBatchFile, prReviewBatchLog, prReviewDir, prReviewGuard, prReviewPost, prReviewDirOk, prReviewFolderAccount, prReviewPane, prReviewSettings, prReviewTurn, writePrReviewAuto, writePrReviewBatch, writePrReviewContext, writePrReviewContextBatch, writePrReviewDir, writePrReviewFiles } from './prReviewDirs'
 
 const URL = 'https://github.com/acme/web/pull/123'
 const ctx = (o: Partial<PrReviewContext> = {}): PrReviewContext => ({
@@ -72,8 +73,8 @@ describe('writePrReviewDir', () => {
     expect(JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8')).selected.url).toBe(URL)
     const s = JSON.parse(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8'))
     expect(s).toEqual(prReviewSettings(prReviewTurn(prReviewGuard(home, 'a')), post))
-    // The script is never allowed unasked but for Automate Review's form; gh's own writes are denied.
-    expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual([`Bash(${post} --auto:*)`])
+    // The script is never allowed unasked but for Automate Review's and Review selected's forms; gh's own writes are denied.
+    expect(s.permissions.allow.filter((a: string) => a.includes('post-review'))).toEqual([`Bash(${post} --auto:*)`, `Bash(${post} --batch:*)`])
     // What runs unasked is outside the folder acceptEdits lets the session rewrite (cp, sed…), and no
     // script of that name is left in the folder for a `./post-review.sh` to find.
     expect(post.startsWith(`${dir}${sep}`)).toBe(false)
@@ -214,5 +215,99 @@ exit 9
   it('one account (none in the context): no account check', () => {
     const w = world(ctx({ account: null }))
     expect(w.run(args, 'whoever').out.ok).toBe(true)
+  })
+
+  describe('the batch (Review selected)', () => {
+    const P1 = 'https://github.com/acme/api/pull/7'
+    const P2 = 'https://github.com/acme/web/pull/8'
+    const log = (home: string) => parseLogLines(existsSync(prReviewBatchLog(prReviewGuard(home, 'a'))) ? readFileSync(prReviewBatchLog(prReviewGuard(home, 'a')), 'utf8') : '')
+    const batched = () => {
+      const w = world()
+      writePrReviewBatch(prReviewGuard(w.home, 'a'), [
+        { url: P1, id: 'b1' },
+        { url: P2, id: 'b2' },
+      ])
+      return w
+    }
+    it('--batch posts a comment to each PR of the batch, once, and logs it with its comment count', () => {
+      const w = batched()
+      const r = w.run(['--batch', '--pr', P1, '--body-file', 'review.md', '--comments-file', 'review.json'])
+      expect(r.out).toEqual({ ok: true, url: `${URL}#pullrequestreview-1`, state: 'COMMENTED' })
+      expect(readFileSync(join(w.home, 'posted-path'), 'utf8').trim()).toBe('repos/acme/api/pulls/7/reviews')
+      expect(JSON.parse(readFileSync(join(w.home, 'posted.json'), 'utf8')).event).toBe('COMMENT')
+      expect(log(w.home)).toEqual([{ id: 'b1', url: P1, status: 'posted', review: `${URL}#pullrequestreview-1`, comments: 1 }])
+      // Still one review per PR per run: the same entry is not posted again.
+      expect(w.run(['--batch', '--pr', P1, '--body-file', 'review.md']).out.error).toMatch(/already posted/)
+      // The other PR of the batch, while P1 is still in the file.
+      expect(w.run(['--batch', '--pr', P2, '--body-file', 'review.md']).out.ok).toBe(true)
+      expect(log(w.home).map((l) => [l.id, l.status])).toEqual([
+        ['b1', 'posted'],
+        ['b2', 'posted'],
+      ])
+    })
+    it('refuses a PR not in the batch, a cancelled one, another event, another account', () => {
+      const w = batched()
+      const other = 'https://github.com/acme/web/pull/99'
+      expect(w.run(['--batch', '--pr', other, '--body-file', 'review.md']).out.error).toMatch(/not in the batch/)
+      expect(w.run(['--batch', '--pr', P1, '--event', 'approve', '--body-file', 'review.md']).out.error).toMatch(/comment/)
+      expect(w.run(['--batch', '--pr', P1, '--body-file', 'review.md'], 'mallory').out.error).toMatch(/this session is mallory/)
+      // The account check failed after the PR was taken: logged as failed.
+      expect(log(w.home)).toEqual([{ id: 'b1', url: P1, status: 'failed', note: "refusing: this session is mallory on GitHub, the tab's account is alice" }])
+      // Cancelled: main dropped it from the file.
+      writePrReviewBatch(prReviewGuard(w.home, 'a'), [{ url: P2, id: 'b2' }])
+      expect(w.run(['--batch', '--pr', P1, '--body-file', 'review.md']).out.error).toMatch(/not in the batch/)
+      expect(w.run(['--batch', '--start', '--pr', P1]).out.error).toMatch(/not in the batch/)
+      // --auto and --batch together, or a mark without --batch: usage.
+      expect(w.run(['--auto', '--batch', '--pr', P2, '--body-file', 'review.md']).out.error).toMatch(/usage/)
+      expect(w.run(['--skip', 'x', '--pr', P2]).out.error).toMatch(/usage/)
+      expect(existsSync(join(w.home, 'posted.json'))).toBe(false)
+    })
+    it('--start, --skip and --fail log a step and post nothing', () => {
+      const w = batched()
+      expect(w.run(['--batch', '--start', '--pr', P1]).out).toEqual({ ok: true, pr: P1, status: 'reviewing' })
+      expect(w.run(['--batch', '--skip', 'no changes since the last review', '--pr', P1]).out.ok).toBe(true)
+      expect(w.run(['--batch', '--fail', 'no access', '--pr', P2]).out.ok).toBe(true)
+      expect(log(w.home)).toEqual([
+        { id: 'b1', url: P1, status: 'reviewing' },
+        { id: 'b1', url: P1, status: 'skipped', note: 'no changes since the last review' },
+        { id: 'b2', url: P2, status: 'failed', note: 'no access' },
+      ])
+      expect(existsSync(join(w.home, 'posted.json'))).toBe(false)
+    })
+    it('GitHub refusing a batch post logs it as failed', () => {
+      const w = batched()
+      writeFileSync(join(w.home, 'bin', 'gh'), '#!/usr/bin/env bash\nif [ "$1 $2" = "api user" ]; then echo alice; exit 0; fi\necho "HTTP 422: Unprocessable" >&2; exit 1\n')
+      expect(w.run(['--batch', '--pr', P1, '--body-file', 'review.md']).out.error).toMatch(/GitHub refused the review: HTTP 422/)
+      expect(log(w.home)).toEqual([{ id: 'b1', url: P1, status: 'failed', note: 'GitHub refused the review: HTTP 422: Unprocessable' }])
+    })
+    it('the asked form takes the selected PR or a PR of the batch (any event), and logs a batch PR', () => {
+      const w = batched()
+      expect(w.run(['--pr', P2, '--event', 'approve', '--body-file', 'review.md']).out.ok).toBe(true)
+      expect(JSON.parse(readFileSync(join(w.home, 'posted.json'), 'utf8')).event).toBe('APPROVE')
+      expect(log(w.home).map((l) => [l.id, l.status])).toEqual([['b2', 'posted']])
+      expect(w.run(['--pr', 'https://github.com/acme/web/pull/99', '--event', 'comment', '--body-file', 'review.md']).out.error).toMatch(/not the PR selected in MasterDeck .* nor in its batch/)
+      // The selected PR (not in the batch) logs nothing.
+      expect(w.run(args).out.ok).toBe(true)
+      expect(log(w.home)).toHaveLength(1)
+    })
+  })
+})
+
+describe('writePrReviewContextBatch', () => {
+  it("replaces context.json's batch only, never the guard; no context yet: nothing", () => {
+    const home = mkdtempSync(join(tmpdir(), 'prr-'))
+    const dir = prReviewDir(home, 'a')
+    writePrReviewContextBatch(dir, [])
+    expect(existsSync(join(dir, 'context.json'))).toBe(false)
+    writePrReviewDir(dir, ctx(), 'x', prReviewGuard(home, 'a'), prReviewPost(home, 'a'))
+    // The session wrote into its context: that never reaches the guard.
+    writeFileSync(join(dir, 'context.json'), JSON.stringify({ ...ctx(), selected: { url: 'https://github.com/acme/web/pull/9' } }))
+    const batch = [{ id: 'b1', status: 'queued', url: URL, repo: 'acme/web', number: 123 }]
+    writePrReviewContextBatch(dir, batch)
+    const c = JSON.parse(readFileSync(join(dir, 'context.json'), 'utf8'))
+    expect(c.batch).toEqual(batch)
+    expect(c.tab).toBe('Mine')
+    expect(JSON.parse(readFileSync(prReviewGuard(home, 'a'), 'utf8')).url).toBe(URL)
+    expect(existsSync(prReviewBatchFile(prReviewGuard(home, 'a')))).toBe(false)
   })
 })

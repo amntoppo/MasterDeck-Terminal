@@ -16,6 +16,8 @@ import { ClaudeMark } from './NewTicket'
 import { SessionAccount } from './AccountBits'
 import { TerminalView } from './TerminalView'
 import { AutoReviewWidget } from './AutoReviewWidget'
+import { BatchPanel, BatchChip } from './ReviewBatch'
+import type { BatchItem } from '@shared/reviewBatch'
 
 interface Props {
   state: AppState
@@ -131,6 +133,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     // Its review session goes with it; the folder stays. Its automation stops.
     closeReviewOf(id)
     void deck().autoReviewSet(id, { review: false, merge: false, name: '', filters: tab.filters, forget: true })
+    void deck().reviewBatchCancel(id, true)
     setTabs(rest)
     if (id === tab.id) setTabId(rest[Math.max(0, tabs.findIndex((t) => t.id === id) - 1)].id)
   }
@@ -156,7 +159,12 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const shownReview = review && !review.hidden ? review : null
   const [panelW, setPanelW] = useState<number>(() => load<number>('prReviewPanelW', 520))
   useEffect(() => save('prReviewPanelW', panelW), [panelW])
-  const [reviewMsg, setReviewMsg] = useState<string | null>(null)
+  const [reviewMsg, setReviewMsg] = useState<{ text: string; bad: boolean } | null>(null)
+  const flash = (text: string, bad = true) => {
+    const m = { text, bad }
+    setReviewMsg(m)
+    setTimeout(() => setReviewMsg((cur) => (cur === m ? null : cur)), 6000)
+  }
   // A tab whose account changed (picked, or disconnected): its session ran as the old one.
   useEffect(() => {
     if (multi && review && review.account !== acct) closeReviewOf(tab.id)
@@ -201,18 +209,14 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     deck().prReviewPrepare({ tabId: tab.id, tab: tab.name, ...(acct ? { account: acct } : {}), filters: tab.filters, ...(url ? { url } : {}), ...(contextOnly ? { context: true } : {}) })
   /**
    * Open the tab's panel; `url`: pick that PR first; `ask`: and ask Claude to review it (typed into
-   * a running session, or the first message of a new one).
+   * a running session, or the first message of a new one); `text`: type that instead (a batch's line).
    */
-  const openReview = async (url?: string, ask = false, restart = false) => {
+  const openReview = async (url?: string, ask = false, restart = false, text?: string) => {
     if (url) select(url)
     const pick = url ?? tab.selected
     const r = await prepare(pick, false)
-    if (!r.ok) {
-      setReviewMsg(r.message)
-      setTimeout(() => setReviewMsg((m) => (m === r.message ? null : m)), 6000)
-      return
-    }
-    const prompt = ask && pick ? reviewPrompt(pick) : undefined
+    if (!r.ok) return flash(r.message)
+    const prompt = text ?? (ask && pick ? reviewPrompt(pick) : undefined)
     const cur = keptReviews[tab.id]
     if (cur && !restart) {
       setReviewOf(tab.id, { ...cur, hidden: false })
@@ -247,6 +251,31 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
     window.addEventListener('mouseup', up)
   }
 
+  // Review selected (#176): the PRs ticked in each tab, and the tab's batch as main has it.
+  const [ticked, setTicked] = useState<Record<string, string[]>>({})
+  const ticks = ticked[tab.id] ?? []
+  const setTicks = (fn: (cur: string[]) => string[]) => setTicked((t) => ({ ...t, [tab.id]: fn(t[tab.id] ?? []) }))
+  const anchor = useRef<string | null>(null)
+  const batch = state.reviewBatch?.[tab.id]
+  const batchOf = useMemo(() => new Map((batch?.items ?? []).map((i) => [i.url, i])), [batch])
+  /** Review selected: the ticked PRs join the tab's batch; the panel opens and the session is told. */
+  const reviewSelected = async () => {
+    const r = await deck().reviewBatchAdd({ tabId: tab.id, urls: ticks, ...(acct ? { account: acct } : {}) })
+    flash(r.message, !r.ok)
+    if (!r.ok) return
+    setTicks(() => [])
+    await openReview(undefined, false, false, r.prompt)
+  }
+  const retryBatch = async (url: string) => {
+    const r = await deck().reviewBatchRetry(tab.id, url)
+    if (!r.ok) return flash(r.message)
+    await openReview(undefined, false, false, r.prompt)
+  }
+  const cancelBatch = async () => {
+    const r = await deck().reviewBatchCancel(tab.id)
+    flash(r.message, !r.ok)
+  }
+
   // Fetch on open when the list is older than 10 minutes (the shared cache absorbs repeats).
   useEffect(() => {
     void deck().refreshTeamPrs(600_000)
@@ -268,6 +297,27 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   // The PR offers are Needs-you items: dismissing one here dismisses it there too.
   const offers = useMemo(() => state.inbox.open.flatMap((e) => (e.item.detail.type === 'offer' ? [{ ...e.item.detail.offer, itemId: e.item.id }] : [])), [state.inbox.open])
   const active = activeFilterCount(f)
+  // Only open PRs can be reviewed: the ones a tick, a range and Select all take.
+  const tickable = useMemo(() => shown.filter((p) => p.state === 'open').map((p) => p.url), [shown])
+  const allTicked = tickable.length > 0 && tickable.every((u) => ticks.includes(u))
+  /** A row's tick: toggled; with Shift, every open row from the last one ticked to this one. */
+  const tick = (url: string, range: boolean) => {
+    const a = anchor.current
+    if (range && a && a !== url && tickable.includes(a) && tickable.includes(url)) {
+      const [i, j] = [tickable.indexOf(a), tickable.indexOf(url)].sort((x, y) => x - y)
+      const span = tickable.slice(i, j + 1)
+      setTicks((cur) => [...new Set([...cur, ...span])])
+    } else setTicks((cur) => (cur.includes(url) ? cur.filter((u) => u !== url) : [...cur, url]))
+    anchor.current = url
+  }
+  /** A click on a row: ⌘/Ctrl ticks it, Shift a range; a plain click selects one PR, as before. */
+  const rowClick = (e: React.MouseEvent, p: TeamPr) => {
+    if ((e.metaKey || e.ctrlKey || e.shiftKey) && p.state === 'open') {
+      e.preventDefault()
+      return tick(p.url, e.shiftKey)
+    }
+    select(p.url)
+  }
   const phone = usePhone()
   const preset = PRESETS.find((p) => (Object.keys(DEFAULT_PR_FILTERS) as (keyof PrFilters)[]).every((k) => k === 'sort' || f[k] === { ...DEFAULT_PR_FILTERS, ...p.f }[k]))
   const loading = state.teamPrsLoading
@@ -429,9 +479,39 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           {shown.length} of {all.length} PRs
           <span className="muted"> · all open PRs, and the latest closed or merged in the last 30 days</span>
         </h3>
+        {ticks.length > 0 && (
+          <div className="sel-bar" role="toolbar" aria-label="Selected PRs">
+            <b>{ticks.length} selected</b>
+            {!allTicked && tickable.length > ticks.length && (
+              <button className="link-btn" onClick={() => setTicks(() => tickable)}>
+                Select all {tickable.length}
+              </button>
+            )}
+            <span style={{ flex: 1 }} />
+            <button className="btn" onClick={() => setTicks(() => [])}>
+              Clear
+            </button>
+            <button className="btn primary claude-btn" onClick={() => void reviewSelected()} title="Claude reviews each in parallel and posts a comment review on each (never approves or merges)">
+              <ClaudeMark /> Review selected
+            </button>
+          </div>
+        )}
         <table className="tbl prs-tbl">
           <thead>
             <tr>
+              <th className="pr-tick">
+                <input
+                  type="checkbox"
+                  checked={allTicked}
+                  ref={(el) => {
+                    if (el) el.indeterminate = !allTicked && ticks.some((u) => tickable.includes(u))
+                  }}
+                  disabled={!tickable.length}
+                  onChange={() => setTicks((cur) => (allTicked ? cur.filter((u) => !tickable.includes(u)) : [...new Set([...cur, ...tickable])]))}
+                  aria-label="Select all open PRs shown"
+                  title="Select all open PRs shown"
+                />
+              </th>
               <th>PR</th>
               <th>Author</th>
               <th>State</th>
@@ -446,7 +526,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           <tbody>
             {shown.length === 0 && (
               <tr>
-                <td colSpan={9} className="muted">
+                <td colSpan={10} className="muted">
                   {loading && !all.length ? 'Loading PRs…' : all.length ? 'No PRs match these filters.' : 'No PRs loaded yet. Press Refresh.'}
                 </td>
               </tr>
@@ -460,7 +540,10 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
                 now={now}
                 state={state}
                 selected={p.url === tab.selected}
-                onSelect={() => select(p.url)}
+                onRowClick={(e) => rowClick(e, p)}
+                ticked={ticks.includes(p.url)}
+                onTick={(range) => tick(p.url, range)}
+                batch={batchOf.get(p.url)}
                 onReview={() => void openReview(p.url, true)}
                 onPr={(url, issue, title) => {
                   select(url)
@@ -475,7 +558,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
           </tbody>
         </table>
       </div>
-      {reviewMsg && <div className="ticket-toast bad-toast">{reviewMsg}</div>}
+      {reviewMsg && <div className={`ticket-toast${reviewMsg.bad ? ' bad-toast' : ''}`}>{reviewMsg.text}</div>}
     </section>
     {shownReview && (
       <>
@@ -500,6 +583,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
               ×
             </button>
           </div>
+          {batch && <BatchPanel batch={batch} onRetry={(u) => void retryBatch(u)} onCancel={() => void cancelBatch()} />}
           <div className="wf-builder-term" ref={termWrap}>
             <TerminalView
               key={paneOf(tab.id, shownReview)}
@@ -524,7 +608,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
             <button className={`link-btn auto-toggle${auto?.review ? ' on' : ''}`} onClick={() => setWidgetOn(!widgetOn)} aria-pressed={widgetOn} title={widgetOn ? 'Hide Automate Review' : 'Show Automate Review'}>
               {widgetOn ? '◂' : '▸'} Auto
             </button>
-            Click a PR in the list to pick it, then ask: “review this PR”, “summarise what changed”, “is it safe to merge?”, “what does the CI failure mean?”. Nothing is posted to GitHub until you say yes to it.
+            Click a PR in the list to pick it, then ask: “review this PR”, “summarise what changed”, “is it safe to merge?”, “what does the CI failure mean?”. Nothing is posted to GitHub until you say yes to it, but for Review selected: tick PRs (⌘/Ctrl or Shift click) and Claude posts a comment review on each.
           </div>
         </aside>
       </>
@@ -561,7 +645,10 @@ function PrRow({
   onAuthor,
   onRepo,
   selected,
-  onSelect,
+  onRowClick,
+  ticked,
+  onTick,
+  batch,
   onReview,
 }: {
   p: TeamPr
@@ -573,7 +660,12 @@ function PrRow({
   onRepo: (r: string) => void
   /** Picked for Review with Claude. */
   selected: boolean
-  onSelect: () => void
+  onRowClick: (e: React.MouseEvent) => void
+  /** Ticked for Review selected; `range`: Shift was held. */
+  ticked: boolean
+  onTick: (range: boolean) => void
+  /** Its place in the tab's batch, if any. */
+  batch?: BatchItem
   /** Pick it, open the panel and ask Claude to review it. */
   onReview: () => void
   onPr: (url: string, issue: Ticket | null, title: string) => void
@@ -595,7 +687,17 @@ function PrRow({
   const review = reviewLabel(p)
   const when = p.state === 'merged' ? p.mergedAt : p.state === 'closed' ? p.closedAt : p.createdAt
   return (
-    <tr className={selected ? 'sel' : ''} onClick={onSelect} aria-selected={selected}>
+    <tr className={`${selected ? 'sel' : ''}${ticked ? ' ticked' : ''}`} onClick={onRowClick} onMouseDown={(e) => e.shiftKey && e.preventDefault()} aria-selected={selected}>
+      <td className="pr-tick" onClick={(e) => e.stopPropagation()}>
+        {open && (
+          <input
+            type="checkbox"
+            checked={ticked}
+            onChange={(e) => onTick((e.nativeEvent as MouseEvent).shiftKey === true)}
+            aria-label={`Select #${p.number} for Review selected`}
+          />
+        )}
+      </td>
       <td className="pr-cell">
         <button className="link-btn" onClick={() => onPr(p.url, pr.refsIssue ? { repo: pr.refsRepo ?? null, number: pr.refsIssue } : null, p.title)} title="Summary and Review PR">
           <PrIcon /> #{p.number}
@@ -603,6 +705,7 @@ function PrRow({
         <button className="link-btn muted-link" onClick={() => onRepo(p.repo)} title={`Only ${p.repo}`}>
           {p.repo}
         </button>{' '}
+        {batch && <BatchChip item={batch} />}{' '}
         {pr.refsIssue ? <span className="chip muted" title="Ticket">{ticketLabel(pr.refsRepo, pr.refsIssue)}</span> : null} {p.draft && <span className="chip muted">draft</span>} <span className="pr-title" title={`${p.title}\n${p.headRef} → ${p.baseRef}`}>{p.title}</span>
         {p.labels.map((l) => (
           <span key={l.name} className="chip label-chip" style={{ borderColor: `#${l.color}` }}>

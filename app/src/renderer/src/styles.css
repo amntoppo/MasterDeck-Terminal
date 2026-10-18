@@ -521,6 +521,29 @@ body.win .sidebar .drag-top { padding-left: 14px; height: 30px; }
 .review-panel .review-on { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .review-panel .wf-builder-head b, .review-panel .wf-builder-head .btn { white-space: nowrap; flex: none; }
 .ticket-toast.bad-toast { border-color: var(--red); }
+/* Review selected (#176): ticks, the selection bar, each PR's place in the batch. */
+.prs-tbl .pr-tick { width: 22px; padding-right: 0; }
+.prs-tbl .pr-tick input { margin: 0; vertical-align: middle; cursor: pointer; }
+.prs-tbl tr.ticked td { background: var(--accent-soft); }
+.sel-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 10px; margin: 0 0 8px; border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent-soft); }
+.batch-chip { font-size: 10px; padding: 0 6px; }
+.b-queued { color: var(--muted); }
+.b-reviewing { color: var(--amber); }
+.b-posted { color: var(--green); }
+.b-skipped { color: var(--muted); }
+.b-failed { color: var(--red); }
+.b-cancelled { color: var(--muted); }
+.batch-chip.b-failed { border-color: var(--red); }
+.batch-chip.b-reviewing { border-color: var(--amber); }
+.batch-panel { border-bottom: 1px solid var(--line); padding: 6px 10px; flex: none; }
+.batch-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.batch-head b { white-space: nowrap; }
+.batch-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow-y: auto; }
+.batch-list li { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; min-width: 0; font-size: 12px; }
+.batch-list li > * { flex: none; }
+.batch-list .batch-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-list .batch-note { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.b-mark { width: 12px; text-align: center; }
 .link-btn.muted-link { color: var(--muted); }
 .link-btn.muted-link:hover { color: var(--accent); }
 .st-open { color: var(--green); } .st-merged { color: var(--purple); } .st-closed { color: var(--red); }

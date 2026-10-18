@@ -2,6 +2,7 @@
 // GitHub board) or /?preview=gate (the sign-in card).
 // main.tsx imports this only under import.meta.env.DEV, so `npm run build:web` leaves it out.
 import type { Root } from 'react-dom/client'
+import { addToBatch, applyLine, batchPrompt, batchTabView, cancelBatch, type BatchTab } from '@shared/reviewBatch'
 import { DECK_ACCESS } from '@shared/remoteDeck'
 import type { DeckApi } from '@shared/ipc'
 import type { AppState } from '@shared/types'
@@ -105,6 +106,8 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
     { id: 'review:prs-mine', sessionId: '', description: 'Automate Review · Mine', command: 'is:pr is:open review-requested:@me archived:false sort:updated-desc org:acme', startedAt: ar0 - 5 * 3600_000, events: 9, lastEventAt: ar0 - 2 * 60_000, queued: 0 },
   ]
   const stateCbs = new Set<(s: AppState) => void>()
+  let batchTabs: Record<string, BatchTab> | undefined
+  let batchSeq = 0
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
   let seq = 1
   const echo = (id: string, d: string) => {
@@ -211,6 +214,43 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
       String(id).startsWith('pr-review:')
         ? { ok: true, replay: reviewScreen(), seq: 1, exited: false }
         : { ok: true, replay: fakeScreen(String(id).replace(/^.*:/, '')), seq: 1, exited: false },
+    // Review selected (#176): the shared rules on the preview's list; each PR is reviewed, then
+    // posted (one in three skipped as unchanged), a second apart, as a session's log would say.
+    reviewBatchAdd: (req: { tabId: string; urls: string[] }) => {
+      const tabs = (batchTabs ??= {})
+      const r = addToBatch(tabs[req.tabId], req.urls, state.teamPrs, Date.now(), () => `p${++batchSeq}`)
+      tabs[req.tabId] = r.tab
+      const push = () => {
+        state.reviewBatch = Object.fromEntries(Object.entries(tabs).map(([k, t]) => [k, batchTabView(t)]))
+        for (const cb of stateCbs) cb({ ...state })
+      }
+      r.added.forEach((i, k) => {
+        setTimeout(() => (applyLine(tabs[req.tabId], { id: i.id, url: i.url, status: 'reviewing' }, Date.now()), push()), 800 + k * 400)
+        setTimeout(
+          () => (
+            applyLine(
+              tabs[req.tabId],
+              k % 3 === 2
+                ? { id: i.id, url: i.url, status: 'skipped', note: 'no changes since the last review' }
+                : { id: i.id, url: i.url, status: 'posted', review: `${i.url}#pullrequestreview-${k + 1}`, comments: k + 1 },
+              Date.now(),
+            ),
+            push()
+          ),
+          4000 + k * 1500,
+        )
+      })
+      push()
+      return { ok: r.added.length > 0, message: `Queued ${r.added.length} PRs`, ...(r.added.length ? { prompt: batchPrompt(r.added) } : {}) }
+    },
+    reviewBatchCancel: (tabId: string) => {
+      const t = batchTabs?.[tabId]
+      const n = t ? cancelBatch(t, Date.now()) : 0
+      if (t) state.reviewBatch = { ...state.reviewBatch, [tabId]: batchTabView(t) }
+      for (const cb of stateCbs) cb({ ...state })
+      return { ok: true, message: `Cancelled ${n} PRs` }
+    },
+    reviewBatchRetry: () => ({ ok: false, message: 'not in the preview' }),
     autoReviewSet: (tabId: string, sw: { review: boolean; merge: boolean }) => {
       const tabs = { ...(state.autoReview?.tabs ?? {}) }
       if (sw.review) tabs[tabId] = { review: true, merge: sw.merge, lastCheck: Date.now(), error: null, pane: null }

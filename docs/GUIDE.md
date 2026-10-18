@@ -999,6 +999,23 @@ nothing for, they show nothing. To remove them all: **Remove** in Settings → M
       never bypassed, and a failed merge is not tried again for the same commit. A browser can turn
       it off, not on.
     - Closing the tab or changing its account switches both off.
+  - **Review selected (#176):** tick several PRs and have Claude review them all at once. Each open
+    PR has a checkbox; **⌘-click** (Ctrl-click) a row to tick it, **Shift-click** to tick every open
+    row from the last one ticked, or tick the header box for every open PR shown. A plain click
+    still picks one PR, as before. A bar above the list says **N selected**, with **Select all**,
+    **Clear** and **Review selected**.
+    - **Review selected** opens the panel and tells the tab's session to review them. Claude reviews
+      the PRs in parallel (a few at a time) and posts a **comment** review on each as soon as it is
+      done, as the tab's account, without asking: pressing the button was the request. It never
+      approves, requests changes or merges; ask for that in the chat (you approve each post then).
+      A PR with no new commits since your last review is skipped, and says so.
+    - Each row shows where its PR is (queued, reviewing, posted, skipped, failed, cancelled), and a
+      **Review selected** block above the chat lists them: a posted one links to its review with
+      its comment count, a skipped or failed one says why and has **Retry**. **Cancel batch** stops
+      every PR not posted yet. When the last one ends it says, e.g., "Reviewed 4: 3 posted, 1 skipped
+      (no changes since the last review)".
+    - Ticking or picking other PRs while a batch runs changes nothing in it; **Review selected**
+      again adds the new ones. The script posts only to the PRs of the batch, once each.
 - **Fix CI / Address comments:** sent to the owning session in master's wording. With no session, the
   Start dialog opens with that instruction filled in.
 - **Auto-babysit:** failing CI or review feedback on my PRs appear as offers, in Needs you and at

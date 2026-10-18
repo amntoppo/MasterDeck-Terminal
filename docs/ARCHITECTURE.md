@@ -1083,6 +1083,32 @@ here (needs `hooks.queue`).
   (`watchStop` switches it off, `watchEvents` its log); `state.autoReview` (`AutoReviewView`) feeds
   `AutoReviewWidget.tsx`, placed by `TerminalView`'s `onInputBox` (`inputBoxRows` finds the rules
   around Claude's prompt).
+- Review selected (#176; `shared/reviewBatch.ts` pure, `main/reviewBatch.ts` `ReviewBatch`; design
+  `docs/plans/2026-10-18-batch-review-design.md`): PRs ticked in a PR tab (checkboxes, ⌘/Ctrl and
+  Shift click, the header's Select all of the open PRs shown) go to `CH.reviewBatchAdd` (remote;
+  the account checks of `prReviewPrepare`, shared as `reviewTabAccount`), which looks each URL up in
+  `state.teamPrs` of the tab's account (`addToBatch`: open PRs only, at most 30 active; one queued or
+  reviewing stays, one that ended is queued again with a new `id`; when nothing runs a new batch
+  starts and the old log is emptied). Each change writes `pr-review-guard/tab-<id>.batch.json`
+  (`writePrReviewBatch`: `[{url, id}]` of the queued, reviewing and failed entries) and
+  context.json's `batch` (`writePrReviewContextBatch` replaces that key only and never touches the
+  guard; a context written whole gets it through `withBatch`). The window then types
+  `batchPrompt` (`[MasterDeck batch-review] Review these PRs as "Batch reviews" in CLAUDE.md says:
+  …`) into the tab's session, or starts it with that line. The briefing's **Batch reviews** has the
+  session run one subagent per PR, at most 4 at a time, each posting on its own with the post
+  script's `--batch` form (allowed unasked by `Bash(<post> --batch:*)`): a COMMENT only, only to an
+  entry of the batch file, once per id (the log has no `posted` for it); `--batch --start`,
+  `--skip <why>` (unchanged since the account's last review) and `--fail <why>` log a step without
+  posting. Every batch step, and a failed post (GitHub refused, wrong account), appends one JSON line
+  to `pr-review-guard/tab-<id>.batch-log.jsonl`; `ReviewBatch.tick` (in the 2 s Automate Review
+  interval) reads it from the kept offset, whole lines only, and folds each line in (`applyLine`: an
+  unknown or old id, or a cancelled entry, changes nothing; `posted` always counts). The asked form
+  accepts the selected PR or any entry (any event, the user approves the run) and logs `posted` for
+  an entry. `CH.reviewBatchCancel` marks what is not posted `cancelled` and drops it from the batch
+  file (a running subagent's post is then refused; `forget` on a tab close, the window only);
+  `CH.reviewBatchRetry` queues one ended entry with a new id and answers its line. Kept with the log
+  offsets in `<home>/review-batch.json`; `state.reviewBatch` (`BatchView`) feeds the row chips and the
+  panel's `BatchPanel` (`renderer/.../ReviewBatch.tsx`).
 - The workflow builder (`builder` spec) runs as the primary account with two or more: the
   `builderSettings` callback of `PtyManager` gives `AccountEnv.settingsArgs(null)`'s `--settings`,
   and nothing while the primary needs to log in again (gh's active account then, as master).
@@ -2349,6 +2375,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `setup-claude/` | Setup's "Let Claude do it" session: `CLAUDE.md`, `md-setup.sh`, `.claude/settings.json` (written fresh by `prepareSetupDir`), the session's `review.json`, `requests/` and `answers/` (see "Setup with Claude") |
 | `pr-review-guard/` | per PR tab, outside the session's folder: `tab-<tabId>.json` (the selected PR's URL and the account) and `post-review-<tabId>.sh` (the post script that checks them) |
 | `auto-review.json` | Automate Review's switches per PR tab and the PRs it follows (#157) |
+| `review-batch.json` | Review selected's batch per PR tab, each PR's id and status, and how far each tab's log was read (#176); the batch file and log are `pr-review-guard/tab-<tabId>.batch.json` / `.batch-log.jsonl` |
 | `pr-review/tab-<tabId>/` | the PR view's review sessions (Review with Claude): `CLAUDE.md`, `context.json`, `.claude/settings.json`, and the review files the session writes |
 | `workflow-builder/`, `ticket-builder/`, `installer/`, `editor-probe` | the builder sessions' folders, Setup's installer folder, editor detection. `ticket-builder/` (two or more accounts: each `ticket-builder/tab-<tabId>/`) also holds `requests/` (`<id>.req`, NUL-separated flags from `create-ticket.sh`; `.taken` once MasterDeck claims it) and `answers/` (`<id>.json`) |
 | `settings.backup.<ts>.json` | Claude settings backups |

@@ -553,6 +553,22 @@ fixes it, and move the item here to "Recently done".
   briefing, which the settings' prefix rule (`Bash(<post> --auto:*)`) may not match: each automated
   post is then asked for. Fine for `~/.claude/masterdeck`; check if MASTERDECK_HOME moves.
 
+## Review selected: open points (2026-10-18, issue #176)
+
+- **Not run with a real Claude session or a real post.** The rules, the store and the post script
+  (with a stand-in `gh`) are tested, and the web preview at 1400 and 390 px drove the ticks, the
+  bar, the chips and the panel against the stub. The first real batch (subagents, posts, the
+  skip check) is the user's.
+- **A `reviewing` PR whose session died stays `reviewing`** until Cancel batch or a new Review
+  selected after it. A timeout (as Automate Review's `STALL_MS`) would end it.
+- **Cancel does not stop a running subagent**, only its post (the script refuses it). Sending Esc
+  to the pane would stop the whole turn, also the user's own question.
+- **The skip check is the session's** (the account's latest review's commit against the head); the
+  script does not enforce it.
+- **The ticks are not kept** across a restart or a reload (per tab, in memory).
+- **The briefing changed**: a running review session reads the new CLAUDE.md only after **New
+  chat** (or a restart of the app, which rewrites it when the panel opens).
+
 ## Review with Claude: open points (2026-10-17, issue #149)
 
 - **Not run with a real Claude session or a real post.** Checked with a stand-in `claude` in the
@@ -1047,6 +1063,13 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   it react by itself.
 
 ## Recently done
+
+- **Review selected (#176)**: tick several PRs in the Pull requests view and **Review selected**;
+  the tab's review session reviews them in parallel (a subagent per PR) and posts a comment review
+  on each, through the post script's `--batch` form, which takes only the PRs of main's batch
+  file, once each; per-PR status on the rows and in the panel, Retry, Cancel batch and a summary.
+  Fixes the "only the last PR clicked was reviewed" bug. (branch
+  `worktree-MasterDeck-Terminal-176-batch-review`)
 
 - **The web app no longer stays on "Loading sessions…" (#168)**: root cause, a state over the
   bridge frame (a real Mac's was 1.21 MB of JSON, 560 KB of it finished master proposals with

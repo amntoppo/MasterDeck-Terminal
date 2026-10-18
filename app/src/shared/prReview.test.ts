@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { prLabel, prRef, prReviewBriefing, prReviewContext, prReviewName, prReviewSpecError, reviewPrompt } from './prReview'
+import { prLabel, prRef, prReviewBatch, prReviewBriefing, prReviewContext, prReviewName, prReviewSpecError, reviewPrompt } from './prReview'
 import { DEFAULT_PR_FILTERS, type TeamPr } from './teamPrs'
 
 const PR: TeamPr = {
@@ -86,6 +86,20 @@ describe('prReviewContext', () => {
   })
 })
 
+describe('prReviewBatch', () => {
+  it("each of main's entries with the PR's facts from the list; a PR gone from the list keeps what main has", () => {
+    const b = prReviewBatch(
+      [
+        { id: 'b1', url: PR.url, repo: 'acme/web', number: 123, status: 'queued' },
+        { id: 'b2', url: 'https://github.com/acme/web/pull/9', repo: 'acme/web', number: 9, status: 'posted' },
+      ],
+      [PR],
+    )
+    expect(b[0]).toMatchObject({ id: 'b1', status: 'queued', url: PR.url, title: 'Fix the redirect', branch: 'fix-redirect', issues: ['acme/api#45'] })
+    expect(b[1]).toEqual({ id: 'b2', status: 'posted', url: 'https://github.com/acme/web/pull/9', repo: 'acme/web', number: 9 })
+  })
+})
+
 describe('prReviewBriefing', () => {
   it('re-reads the context, reads with gh, and posts only after a yes, through the script', () => {
     const b = prReviewBriefing('alice', "/h/pr-review-guard/post-review-t.sh")
@@ -109,6 +123,17 @@ describe('prReviewBriefing', () => {
     expect(b).toMatch(/always a comment review: never approve, never request changes, never merge/)
     // A path that needs quotes is given quoted (it is then asked for, as any other run).
     expect(prReviewBriefing('alice', "/h o/post-review-a.sh")).toContain("\n'/h o/post-review-a.sh' --auto --pr")
+  })
+  it('batch reviews: the marked message, a subagent per PR, each posted with --batch, never approve', () => {
+    const post = '/h/pr-review-guard/post-review-a.sh'
+    const b = prReviewBriefing('alice', post)
+    expect(b).toContain('[MasterDeck batch-review]')
+    expect(b).toMatch(/one subagent \(the Agent tool\) per PR, at most 4 at a time/)
+    // Bare and with --batch first, so the settings' prefix rule (`Bash(<post> --batch:*)`) matches every form.
+    for (const f of ['--batch --start --pr', '--batch --skip "no changes since the last review" --pr', '--batch --pr <url> --body-file', '--batch --fail'])
+      expect(b).toContain(`${post} ${f}`)
+    expect(b).toMatch(/`--batch` is always a comment review: never approve, never request changes, never merge/)
+    expect(b).toMatch(/or to a PR of `batch` that is not posted/)
   })
 })
 
