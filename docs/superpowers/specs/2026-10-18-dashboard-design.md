@@ -203,7 +203,7 @@ Every row also has **Dismiss** (×). A row's title opens its target.
 ### Shape
 
 ```ts
-// shared/activity.ts
+// shared/activityLog.ts
 type ActivityType =
   | 'session-started' | 'session-finished' | 'session-ended'
   | 'pr-opened' | 'pr-reviewed' | 'pr-merged' | 'pr-closed'
@@ -266,7 +266,7 @@ From main's stores, through one `activity.add(e)`:
 
 ### The store
 
-`main/activity.ts`, `ActivityLog`:
+`main/activityLog.ts`, `ActivityLog`:
 
 - **File**: `<MASTERDECK_HOME>/activity.jsonl`, one event per line, appended.
 - **Load**: it keeps the last 14 days and at most 5000 lines. A line that does not parse is
@@ -488,11 +488,11 @@ and the row is hidden.
 
 New:
 
-- `shared/activity.ts` (+ test)
+- `shared/activityLog.ts` (+ test)
 - `shared/dashboard.ts` (+ test): `attentionItems`, `nowView`, `deliveryView`, `usageView`,
   `healthView`
 - `shared/dashboardLayout.ts` (+ test)
-- `main/activity.ts` (+ test)
+- `main/activityLog.ts` (+ test)
 - `renderer/src/components/DashboardView.tsx`
 - `renderer/src/components/dashboard/{Card,AttentionCard,NowCard,TimelineCard,DeliveryCard,UsageCard,HealthCard,Sparkline}.tsx`
 - `renderer/src/components/InboxCard.tsx` (moved from `Sidebar.tsx`, unchanged)

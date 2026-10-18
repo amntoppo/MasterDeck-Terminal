@@ -47,13 +47,13 @@ The behaviour comes from the code the Needs-you list runs, with no second copy. 
   reviewed, so the reviews stay small.
 - Task 2 needs task 1's types.
 - Task 3 needs tasks 1 and 2.
-- Task 6 needs task 1's types (the timeline filter lives in `activity.ts`).
+- Task 6 needs task 1's types (the timeline filter lives in `activityLog.ts`).
 
 ---
 
-### Task 1: the activity log's logic (`shared/activity.ts`)
+### Task 1: the activity log's logic (`shared/activityLog.ts`)
 
-**Files**: `app/src/shared/activity.ts` and `app/src/shared/activity.test.ts`, both new.
+**Files**: `app/src/shared/activityLog.ts` and `app/src/shared/activityLog.test.ts`, both new.
 
 1. **Write the types exactly as the spec's "Shape"**: `ActivityType`, `ActivityEvent`,
    `ActivityTarget`. Also:
@@ -113,9 +113,9 @@ The behaviour comes from the code the Needs-you list runs, with no second copy. 
 - titles are plain sentences
 - no `AppState` field is added
 
-### Task 2: `ActivityLog` (`main/activity.ts`)
+### Task 2: `ActivityLog` (`main/activityLog.ts`)
 
-**Files**: `app/src/main/activity.ts` and `app/src/main/activity.test.ts`, both new.
+**Files**: `app/src/main/activityLog.ts` and `app/src/main/activityLog.test.ts`, both new.
 
 1. **Write the tests first, with a temp dir**:
    - `add(e)` appends one JSON line
@@ -164,9 +164,9 @@ caller.
    exist before the save or append. Test it. Main logs `note-added`: "A note was added", or "A
    note was added to #42" for a ticket note (from `meta.ticket`), with target `{note: id}`.
    
-   Add a test in `main/activity.test.ts` or a new `main/noteActivity.test.ts` that builds the
+   Add a test in `main/activityLog.test.ts` or a new `main/noteActivity.test.ts` that builds the
    event through the same mapping function. It asserts that no field contains the note's title
-   or its preview. Put the mapping in `shared/activity.ts` as `noteEvent(change)` so it can be
+   or its preview. Put the mapping in `shared/activityLog.ts` as `noteEvent(change)` so it can be
    tested.
 6. **Inbox**: `sources.inbox.on("event")` with `type === "resolved"` gives `needs-you-answered`,
    titled with the item's title and detailed with `resolvedHow`. Skip `dismissed`, and skip a
