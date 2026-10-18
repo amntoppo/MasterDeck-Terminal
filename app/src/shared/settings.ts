@@ -1,6 +1,7 @@
 import { DEFAULT_MEETINGS, normalizeMeetings, type MeetingsSettings } from './meetings'
 import { isThemePref, type ThemePref } from './themes'
 import { defaultRoutes, normalizeRoutes, type NotifyRoutes } from './notifications'
+import { cleanRailOrder } from './railOrder'
 
 export interface Settings {
   idleNudgeMinutes: number
@@ -32,6 +33,8 @@ export interface Settings {
   autoDownloadUpdates: boolean
   /** Settings → Updates: stable releases, or betas too. */
   updateChannel: 'stable' | 'beta'
+  /** The left rail's icon order (shared/railOrder.ts); empty is the default. */
+  railOrder: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -53,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
   autoDownloadUpdates: true,
   updateChannel: 'stable',
+  railOrder: [],
 }
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number) =>
@@ -80,5 +84,6 @@ export function normalizeSettings(raw: unknown): Settings {
     theme: isThemePref(r.theme) ? r.theme : DEFAULT_SETTINGS.theme,
     autoDownloadUpdates: typeof r.autoDownloadUpdates === 'boolean' ? r.autoDownloadUpdates : DEFAULT_SETTINGS.autoDownloadUpdates,
     updateChannel: r.updateChannel === 'beta' ? 'beta' : 'stable',
+    railOrder: cleanRailOrder(r.railOrder),
   }
 }
