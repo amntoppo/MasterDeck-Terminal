@@ -14,6 +14,8 @@ import type { UpdateState } from './updates'
 import type { WatchInfo } from './watches'
 import type { PrWatchRow } from './watchPr'
 import type { GhAccountStatus } from './accounts'
+import { DERIVED_COLUMNS, withoutDerived } from './derivedBoard'
+import type { ProcsAll } from './sessionProcs'
 
 /**
  * The Dashboard's cards (#183), worked out from what the renderer already has. Pure: every
@@ -156,6 +158,12 @@ function inboxRow(e: InboxEntry): AttentionItem {
 
 type PrReason = 'ci' | 'changes' | 'threads' | 'ready'
 
+/**
+ * state.watches also lists every PR watch (`pr:<url>`) and Automate Review tab (`review:<tabId>`)
+ * beside the monitors, for Details; the Dashboard reads those from prWatches and autoReview.
+ */
+const isMonitor = (w: WatchInfo) => !w.id.startsWith('pr:') && !w.id.startsWith('review:')
+
 /** Needs attention: the inbox's open items and what MasterDeck sees itself, one row per subject. */
 export function attentionItems(input: AttentionInput, now: number): AttentionList {
   const open = input.inbox.open.filter((e) => e.state === 'open')
@@ -250,9 +258,12 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
       const have = latest.get(r.scheduleId)
       if (!have || r.startedAt > have.startedAt) latest.set(r.scheduleId, r)
     }
+    const schedules = new Map(input.sched.schedules.map((x) => [x.id, x]))
     for (const r of latest.values()) {
       const at = r.endedAt ?? r.startedAt
-      if (r.status !== 'failed' || now - at > DAY) continue
+      // A schedule since deleted has nothing to retry or open.
+      const sc = schedules.get(r.scheduleId)
+      if (!sc || r.status !== 'failed' || now - at > DAY) continue
       derived.push({
         id: `run:${r.id}`,
         tier: 'soon',
@@ -261,7 +272,8 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
         why: r.reason ? firstLine(r.reason) : 'Its last run failed',
         at,
         target: { schedules: true },
-        actions: [{ type: 'retry', label: 'Retry', primary: true }, { type: 'open', label: 'Open' }],
+        // A disabled schedule is not run again from here: Open shows it.
+        actions: sc.enabled ? [{ type: 'retry', label: 'Retry', primary: true }, { type: 'open', label: 'Open' }] : [{ type: 'open', label: 'Open', primary: true }],
         fingerprint: fingerprintOf({ run: r }),
         scheduleId: r.scheduleId,
       })
@@ -271,7 +283,7 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
   // A monitor or PR watch that cannot read its source.
   const bySid = new Map(input.sessions.map((s) => [s.sessionId, s]))
   for (const w of input.watches) {
-    if (!w.error) continue
+    if (!w.error || !isMonitor(w)) continue
     const s = bySid.get(w.sessionId)
     derived.push({
       id: `watch:${w.id}`,
@@ -285,18 +297,22 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
       fingerprint: fingerprintOf({ watch: w }),
     })
   }
+  const prInfo = new Map(input.watches.filter((w) => w.id.startsWith('pr:')).map((w) => [w.id.slice(3), w]))
   for (const w of input.prWatches) {
     if (!w.error) continue
+    // state.watches carries the same watch as `pr:<url>`, with when its error started.
+    const errorAt = prInfo.get(w.url)?.errorAt ?? null
+    const t = w.target
     derived.push({
       id: `watch:pr:${w.url}`,
       tier: 'soon',
       rank: 40,
       title: `PR watch "${prLabel(w.url, w.repo, w.number)}" cannot read its source`,
       why: firstLine(w.error),
-      at: w.lastEvent?.at ?? w.startedAt,
-      target: { view: 'prs' },
+      at: errorAt ?? w.lastEvent?.at ?? w.startedAt,
+      target: t && 'session' in t ? { session: t.session.key } : { view: 'prs' },
       actions: [{ type: 'open', label: 'Open', primary: true }],
-      fingerprint: fingerprintOf({ watch: { error: w.error } }),
+      fingerprint: fingerprintOf({ watch: { error: w.error, errorAt } }),
     })
   }
 
@@ -326,16 +342,6 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
 // ---------------------------------------------------------------------------------------------
 // Now
 
-/**
- * The part of `procs:all`'s answer the Dashboard reads (`ProcsAll` in shared/sessionProcs.ts is
- * assignable to it). Kept narrow so a card can be tested without a full process table.
- */
-export interface ProcsInput {
-  at: number
-  sessions: Record<string, { pid: number; command: string; state: 'running' | 'exited'; ports: { port: number }[] }[]>
-  strays: { pid: number; command: string; cwd: string | null; ports: { port: number }[]; folderOf: string | null }[]
-}
-
 export interface NowInput {
   sessions: Session[]
   /** By sessionId, as the state keeps them. */
@@ -345,7 +351,7 @@ export interface NowInput {
   /** Two or more GitHub accounts: rows carry their account. */
   multi: boolean
   /** `procs:all`; null until read. */
-  procs: ProcsInput | null
+  procs: ProcsAll | null
   watches: WatchInfo[]
   prWatches: PrWatchRow[]
   autoReview: AutoReviewView | null
@@ -374,7 +380,8 @@ export interface NowView {
   total: number
   more: number
   /** Null until `procs:all` was read. */
-  procs: { at: number; rows: { key: string; session: string; pid: number; command: string; ports: number[] }[] } | null
+  /** `error`: the read was incomplete ("Processes could not be read: …"); the rows are then not all. */
+  procs: { at: number; error: string | null; rows: { key: string; session: string; pid: number; command: string; ports: number[] }[] } | null
   watching: { id: string; label: string; at: number | null; target: AttentionTarget }[]
   nextRuns: { id: string; name: string; at: number; when: string }[]
 }
@@ -421,6 +428,7 @@ export function nowView(input: NowInput, now: number): NowView {
   const live = new Map(input.sessions.filter((s) => s.state !== 'done' && s.state !== 'suspended').map((s) => [s.key, s]))
   const procs = input.procs && {
     at: input.procs.at,
+    error: input.procs.error ? `Processes could not be read: ${firstLine(input.procs.error)}` : null,
     rows: Object.entries(input.procs.sessions).flatMap(([key, list]) => {
       const s = live.get(key)
       if (!s) return []
@@ -431,7 +439,7 @@ export function nowView(input: NowInput, now: number): NowView {
   const bySid = new Map(input.sessions.map((s) => [s.sessionId, s]))
   const watching: NowView['watching'] = [
     ...input.prWatches.map((w) => ({ id: `prwatch:${w.url}`, label: `PR watch · ${prLabel(w.url, w.repo, w.number)}`, at: w.lastEvent?.at ?? null, target: { pr: w.url } as AttentionTarget })),
-    ...input.watches.map((w) => {
+    ...input.watches.filter(isMonitor).map((w) => {
       const s = bySid.get(w.sessionId)
       return { id: `watch:${w.id}`, label: w.description || w.command, at: w.lastEventAt, target: (s ? { session: s.key } : { view: 'terminals' }) as AttentionTarget }
     }),
@@ -489,8 +497,8 @@ export interface DeliveryView {
   }
 }
 
-function columnCounts(b: Board): { total: number; columns: ColumnCount[] } {
-  const counts = new Map(b.columns.map((c) => [c, 0]))
+function columnCounts(b: Board, names: readonly string[] = b.columns): { total: number; columns: ColumnCount[] } {
+  const counts = new Map(names.map((c) => [c, 0]))
   let other = 0
   for (const c of b.cards) {
     if (c.status !== null && counts.has(c.status)) counts.set(c.status, counts.get(c.status)! + 1)
@@ -506,7 +514,7 @@ export function deliveryView(input: DeliveryInput, now: number): DeliveryView {
   const b = input.board
   let sprint: SprintView
   if (!b) sprint = { kind: 'none', text: 'No board yet. Pick one in Setup, or create a GitHub board.' }
-  else if (b.derived?.length && !b.cards.some((c) => !c.derived)) sprint = { kind: 'derived', text: 'No sprint: this account has no GitHub board', ...columnCounts(b) }
+  else if (b.derived?.length && !b.cards.some((c) => !c.derived)) sprint = { kind: 'derived', text: 'No sprint: this account has no GitHub board', ...columnCounts(b, DERIVED_COLUMNS) }
   else {
     const sp = b.sprint ? input.sprints.find((s) => s.title === b.sprint) : undefined
     let bd: Extract<SprintView, { kind: 'board' }>['burndown'] = null
@@ -518,7 +526,8 @@ export function deliveryView(input: DeliveryInput, now: number): DeliveryView {
       const seen = [...upto].reverse().find((p) => p.remaining !== null)
       bd = { points, left: seen?.remaining ?? null, planned: Math.round(at?.ideal ?? 0) }
     }
-    sprint = { kind: 'board', title: b.sprint, ...columnCounts(b), burndown: bd }
+    // Derived cards are in no sprint (as the Summary dialog counts it).
+    sprint = { kind: 'board', title: b.sprint, ...columnCounts(withoutDerived(b)), burndown: bd }
   }
 
   const mine = mineSet(input.me, input.logins)
@@ -584,7 +593,6 @@ export interface UsageView {
   warnings: UsageWarning[]
 }
 
-const accountOf = (rec: CostBook[string]): string | null => (rec as { account?: string }).account ?? null
 
 const clock = (t: number) => {
   const d = new Date(t)
@@ -620,7 +628,7 @@ export function usageView(input: UsageInput, now: number): UsageView {
     weekCost += w
     todayTok += toks(id, today)
     weekTok += wt
-    const acct = accountOf(rec)?.toLowerCase() ?? null
+    const acct = rec.account?.toLowerCase() ?? null
     const a = perAccount.get(acct) ?? { today: 0, week: 0, tokens: 0 }
     a.today += t
     a.week += w
@@ -703,7 +711,7 @@ export interface HealthRow {
   detail: string
   action?: HealthAction
   /** The strays row: the list Show expands. */
-  strays?: ProcsInput['strays']
+  strays?: ProcsAll['strays']
 }
 
 export interface HealthInput {
@@ -711,7 +719,8 @@ export interface HealthInput {
   remoteEnabled: boolean
   remote: AppState['remote']
   browsers: NonNullable<AppState['browsers']>
-  ghAccounts: GhAccountStatus[]
+  /** Undefined until the first account status. */
+  ghAccounts: GhAccountStatus[] | undefined
   ghCache: GhCacheStatus | null
   boardError: string | null
   teamPrsError: string | null
@@ -721,7 +730,7 @@ export interface HealthInput {
   hooks: HookStatus
   statuslineInstalled: boolean
   /** `procs:all`; null: not read yet. */
-  procs: ProcsInput | null
+  procs: ProcsAll | null
   /** The janitor's answer; null: not checked yet. */
   janitor: JanitorRow[] | null
   /** Processes are not read on Windows. */
@@ -758,20 +767,22 @@ export function healthView(input: HealthInput): HealthView {
       rows.push({ id: 'remote', status: 'ok', label, detail: n ? `Connected · ${plural(n, 'browser')}` : 'Connected' })
     } else if (r.conn === 'connecting') rows.push({ id: 'remote', status: 'warn', label, detail: 'Connecting…' })
     else if (r.conn === 'error') rows.push({ id: 'remote', status: 'bad', label, detail: r.message || 'Cannot connect' })
-    else rows.push({ id: 'remote', status: 'bad', label, detail: 'Off, though it is turned on in Settings' })
+    else rows.push({ id: 'remote', status: 'bad', label, detail: r.message || 'Off, though it is turned on in Settings' })
   }
 
   // GitHub
   {
     const label = 'GitHub'
-    const sick = input.ghAccounts.find((a) => !a.healthy)
+    const accts = input.ghAccounts
+    const sick = accts?.find((a) => !a.healthy)
     const paused = input.ghCache?.pausedUntil && input.ghCache.pausedUntil > input.now ? input.ghCache : null
     if (sick) rows.push({ id: 'github', status: 'bad', label, detail: `${sick.login}: ${sick.error || 'needs to log in again'}` })
     else if (paused) rows.push({ id: 'github', status: 'warn', label, detail: `Paused until ${clock(paused.pausedUntil!)} (${paused.pauseReason || 'rate limit'})` })
     else if (input.boardError) rows.push({ id: 'github', status: 'warn', label, detail: `The board cannot be read: ${firstLine(input.boardError)}` })
     else if (input.teamPrsError) rows.push({ id: 'github', status: 'warn', label, detail: `Pull requests cannot be read: ${firstLine(input.teamPrsError)}` })
-    else if (!input.ghAccounts.length) rows.push({ id: 'github', status: 'warn', label, detail: 'No account connected' })
-    else rows.push({ id: 'github', status: 'ok', label, detail: `${plural(input.ghAccounts.length, 'account')} connected` })
+    else if (!accts) rows.push({ id: 'github', status: 'unknown', label, detail: 'Accounts not read yet' })
+    else if (!accts.length) rows.push({ id: 'github', status: 'warn', label, detail: 'No account connected' })
+    else rows.push({ id: 'github', status: 'ok', label, detail: `${plural(accts.length, 'account')} connected` })
   }
 
   // Claude
@@ -787,11 +798,13 @@ export function healthView(input: HealthInput): HealthView {
 
   // Hooks and status line
   {
+    // MasterDeck installs no deck hooks on Windows: only the status line applies there.
+    const w = input.windows
     const missing = [
       ...(input.statuslineInstalled ? [] : ['the status line']),
-      ...(input.hooks.queue ? [] : ['the /queue hook']),
-      ...(input.hooks.reviewGate ? [] : ['the self-review gate']),
-      ...(input.hooks.masterGuard ? [] : ['the master reports guard']),
+      ...(w || input.hooks.queue ? [] : ['the /queue hook']),
+      ...(w || input.hooks.reviewGate ? [] : ['the self-review gate']),
+      ...(w || input.hooks.masterGuard ? [] : ['the master reports guard']),
     ]
     rows.push(
       missing.length
@@ -812,12 +825,14 @@ export function healthView(input: HealthInput): HealthView {
     const p = input.procs
     if (input.windows) rows.push({ id: 'strays', status: 'unknown', label, detail: 'Not available on Windows' })
     else if (!p) rows.push({ id: 'strays', status: 'unknown', label, detail: 'Not checked' })
+    else if (p.error && !p.strays.length) rows.push({ id: 'strays', status: 'warn', label, detail: `Could not be read: ${firstLine(p.error)}` })
     else if (!p.strays.length) rows.push({ id: 'strays', status: 'ok', label, detail: 'None found' })
     else {
       const s = p.strays[0]
       const port = s.ports[0] ? ` :${s.ports[0].port}` : ''
       const more = p.strays.length > 1 ? `, and ${p.strays.length - 1} more` : ''
-      rows.push({ id: 'strays', status: 'warn', label, detail: `${strayName(s.command)}${port} from a finished session${more}`, action: { type: 'show-strays', label: 'Show' }, strays: p.strays })
+      const partial = p.error ? ' (the read was incomplete)' : ''
+      rows.push({ id: 'strays', status: 'warn', label, detail: `${strayName(s.command)}${port} from a finished session${more}${partial}`, action: { type: 'show-strays', label: 'Show' }, strays: p.strays })
     }
   }
 
@@ -841,6 +856,9 @@ export function healthView(input: HealthInput): HealthView {
     else if (u.phase === 'ready' && v) rows.push({ id: 'masterdeck', status: 'warn', label, detail: `${v} is ready to install`, action: { type: 'update', label: 'Restart to update' } })
     else if (v && (u.phase === 'available' || u.phase === 'downloading' || u.phase === 'verifying')) rows.push({ id: 'masterdeck', status: 'warn', label, detail: `${v} is available` })
     else if (!u.enabled) rows.push({ id: 'masterdeck', status: 'ok', label, detail: u.current })
+    else if (u.phase === 'checking') rows.push({ id: 'masterdeck', status: 'ok', label, detail: `${u.current}, checking for updates…` })
+    else if (u.phase === 'installing') rows.push({ id: 'masterdeck', status: 'warn', label, detail: v ? `Installing ${v}…` : 'Installing an update…' })
+    else if (u.phase === 'idle') rows.push({ id: 'masterdeck', status: 'ok', label, detail: u.current })
     else rows.push({ id: 'masterdeck', status: 'ok', label, detail: `${u.current}, up to date` })
   }
 

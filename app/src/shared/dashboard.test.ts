@@ -23,6 +23,7 @@ import type { WatchInfo } from './watches'
 import type { PrWatchRow } from './watchPr'
 import type { CostBook } from './costs'
 import type { JanitorRow } from './ipc'
+import type { ProcsAll } from './sessionProcs'
 
 const NOW = new Date(2026, 9, 18, 15, 0).getTime() // Sunday 18 Oct 2026, 15:00 local
 const MIN = 60_000
@@ -198,14 +199,20 @@ describe('attentionItems', () => {
   })
 
   it('finds a schedule whose last run failed in the last day', () => {
-    const l = attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - 2 * HOUR, { reason: 'The session never started' })]) }), NOW)
+    const l = attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - 2 * HOUR, { reason: 'The session never started' })], [schedView('s1')]) }), NOW)
     expect(l.items[0]).toMatchObject({ id: 'run:r1', tier: 'soon', rank: 42, title: 'Schedule "job-s1" failed', why: 'The session never started', target: { schedules: true }, scheduleId: 's1', fingerprint: 'r1' })
     expect(l.items[0].actions.map((a) => a.type)).toEqual(['retry', 'open'])
   })
 
-  it('gives nothing for a failed run with a later run, or one older than a day', () => {
-    expect(attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - 3 * HOUR), run('r2', 's1', 'done', NOW - HOUR)]) }), NOW).total).toBe(0)
-    expect(attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - 25 * HOUR)]) }), NOW).total).toBe(0)
+  it('gives nothing for a failed run with a later run, one older than a day, or one of a deleted schedule', () => {
+    expect(attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - 3 * HOUR), run('r2', 's1', 'done', NOW - HOUR)], [schedView('s1')]) }), NOW).total).toBe(0)
+    expect(attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - 25 * HOUR)], [schedView('s1')]) }), NOW).total).toBe(0)
+    expect(attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - HOUR)], [schedView('other')]) }), NOW).total).toBe(0)
+  })
+
+  it('offers no Retry for a disabled schedule', () => {
+    const l = attentionItems(attn({ sched: sched([run('r1', 's1', 'failed', NOW - HOUR)], [schedView('s1', { enabled: false })]) }), NOW)
+    expect(l.items[0].actions).toEqual([{ type: 'open', label: 'Open', primary: true }])
   })
 
   it('finds a monitor error and a PR watch error', () => {
@@ -216,6 +223,21 @@ describe('attentionItems', () => {
     ])
     expect(l.items[1].target).toEqual({ session: 'a' })
     expect(l.items[0].target).toEqual({ view: 'prs' })
+  })
+
+  it('reads the real watch list: monitors, PR watches (pr:) and Automate Review tabs (review:) once each', () => {
+    const url = 'https://github.com/acme/web/pull/3'
+    const watches = [
+      watch('w1', { error: 'gh: not found', errorAt: NOW - MIN }),
+      watch(`pr:${url}`, { error: 'HTTP 404', errorAt: NOW - 10 * MIN, description: 'PR watch acme/web#3' }),
+      watch('review:tab1', { sessionId: '', error: 'cannot read', errorAt: NOW - MIN, description: 'Automate Review' }),
+    ]
+    const prWatches = [prw(3, { error: 'HTTP 404', target: { session: { key: 'a', name: 'a' } } })]
+    const l = attentionItems(attn({ sessions: [sess('a', 'idle')], watches, prWatches }), NOW)
+    expect(l.items.map((i) => i.id)).toEqual([`watch:pr:${url}`, 'watch:w1'])
+    expect(l.items[0]).toMatchObject({ at: NOW - 10 * MIN, target: { session: 'a' }, fingerprint: `HTTP 404|${NOW - 10 * MIN}` })
+    const v = nowView(nowIn({ sessions: [sess('a', 'idle')], watches, prWatches }), NOW)
+    expect(v.watching.map((w) => w.id)).toEqual([`prwatch:${url}`, 'watch:w1'])
   })
 
   it('offers an update only when it is ready with an offer', () => {
@@ -325,9 +347,10 @@ describe('nowView', () => {
   it('lists the running processes with ports of listed sessions', () => {
     const p = (pid: number, command: string, ports: number[], state: 'running' | 'exited' = 'running') => ({ pid, command, state, ports: ports.map((port) => ({ host: '127.0.0.1', port })) })
     const procs = { at: NOW - 3 * MIN, sessions: { a: [p(1, 'npm run dev', [5173]), p(2, 'npm test', []), p(3, 'old', [9000], 'exited')], gone: [p(4, 'vite', [5174])], d: [p(5, 'vite', [5175])] }, strays: [] }
-    const v = nowView(nowIn({ sessions: [sess('a', 'working', { name: 'web' }), sess('d', 'done')], procs }), NOW)
-    expect(v.procs).toEqual({ at: NOW - 3 * MIN, rows: [{ key: 'a', session: 'web', pid: 1, command: 'npm run dev', ports: [5173] }] })
-    expect(nowView(nowIn({ procs: { at: NOW, sessions: {}, strays: [] } }), NOW).procs).toEqual({ at: NOW, rows: [] })
+    const v = nowView(nowIn({ sessions: [sess('a', 'working', { name: 'web' }), sess('d', 'done')], procs: procs as unknown as ProcsAll }), NOW)
+    expect(v.procs).toEqual({ at: NOW - 3 * MIN, error: null, rows: [{ key: 'a', session: 'web', pid: 1, command: 'npm run dev', ports: [5173] }] })
+    expect(nowView(nowIn({ procs: { at: NOW, sessions: {}, strays: [] } }), NOW).procs).toEqual({ at: NOW, error: null, rows: [] })
+    expect(nowView(nowIn({ procs: { at: NOW, sessions: {}, strays: [], error: 'ps failed (exit 1)' } }), NOW).procs).toEqual({ at: NOW, error: 'Processes could not be read: ps failed (exit 1)', rows: [] })
   })
 
   it('lists what it is watching', () => {
@@ -389,7 +412,13 @@ describe('deliveryView', () => {
   it('says a derived board has no sprint, with its counts', () => {
     const board: Board = { takenAt: null, sprint: null, columns: ['Todo', 'Done'], cards: [card(1, 'Todo', { derived: true, project: null })], derived: [{ account: null, repos: ['acme/web'], total: 1, shown: 1, skipped: [], missing: [] }] }
     const v = deliveryView(delIn({ board }), NOW)
-    expect(v.sprint).toMatchObject({ kind: 'derived', text: 'No sprint: this account has no GitHub board', columns: [{ name: 'Todo', count: 1 }, { name: 'Done', count: 0 }] })
+    expect(v.sprint).toMatchObject({ kind: 'derived', text: 'No sprint: this account has no GitHub board', columns: [{ name: 'Todo', count: 1 }, { name: 'In Dev', count: 0 }, { name: 'PR Raised', count: 0 }, { name: 'Done', count: 0 }] })
+  })
+
+  it('leaves derived cards out of a board with a sprint', () => {
+    const board: Board = { takenAt: null, sprint: null, columns: ['Ready', 'Done'], cards: [card(1, 'Ready'), card(2, 'Todo', { derived: true, project: null }), card(3, 'Done', { derived: true, project: null })], derived: [{ account: 'x', repos: ['acme/web'], total: 2, shown: 2, skipped: [], missing: [] }] }
+    const v = deliveryView(delIn({ board }), NOW)
+    expect(v.sprint).toMatchObject({ kind: 'board', total: 1, columns: [{ name: 'Ready', count: 1 }, { name: 'Done', count: 0 }] })
   })
 
   it('counts my PRs: KPIs and stages', () => {
@@ -535,6 +564,7 @@ describe('healthView', () => {
     expect(row(healthIn({ remoteEnabled: true, remote: { conn: 'connecting', message: null, lastSyncAt: null, hasToken: true } }), 'remote')).toMatchObject({ status: 'warn', detail: 'Connecting…' })
     expect(row(healthIn({ remoteEnabled: true, remote: { conn: 'error', message: 'token refused', lastSyncAt: null, hasToken: true } }), 'remote')).toMatchObject({ status: 'bad', detail: 'token refused' })
     expect(row(healthIn({ remoteEnabled: true, remote: { conn: 'off', message: null, lastSyncAt: null, hasToken: true } }), 'remote')).toMatchObject({ status: 'bad', detail: 'Off, though it is turned on in Settings' })
+    expect(row(healthIn({ remoteEnabled: true, remote: { conn: 'off', message: 'Sign in first', lastSyncAt: null, hasToken: false } }), 'remote')).toMatchObject({ status: 'bad', detail: 'Sign in first' })
     expect(row(healthIn({ remoteEnabled: true }), 'remote')).toMatchObject({ status: 'unknown' })
     expect(healthView(healthIn({ remoteEnabled: true, remote: { conn: 'error', message: 'x', lastSyncAt: null, hasToken: true } })).summary).toBe('1 problem')
   })
@@ -545,6 +575,7 @@ describe('healthView', () => {
     expect(row(healthIn({ boardError: 'no project' }), 'github')).toMatchObject({ status: 'warn', detail: 'The board cannot be read: no project' })
     expect(row(healthIn({ teamPrsError: 'HTTP 502' }), 'github')).toMatchObject({ status: 'warn', detail: 'Pull requests cannot be read: HTTP 502' })
     expect(row(healthIn(), 'github')).toMatchObject({ status: 'ok', detail: '1 account connected' })
+    expect(row(healthIn({ ghAccounts: undefined }), 'github')).toMatchObject({ status: 'unknown' })
   })
 
   it('reads Claude', () => {
@@ -556,6 +587,12 @@ describe('healthView', () => {
   it('reads the hooks and the status line, with Fix', () => {
     const r = row(healthIn({ statuslineInstalled: false, hooks: { queue: true, foreignQueue: false, reviewGate: false, masterGuard: true } }), 'hooks')
     expect(r).toMatchObject({ status: 'warn', detail: 'Not installed: the status line, the self-review gate', action: { type: 'settings', section: 'hooks', label: 'Fix' } })
+  })
+
+  it('checks only the status line on Windows', () => {
+    const none = { queue: false, foreignQueue: false, reviewGate: false, masterGuard: false }
+    expect(row(healthIn({ windows: true, hooks: none }), 'hooks')).toMatchObject({ status: 'ok' })
+    expect(row(healthIn({ windows: true, hooks: none, statuslineInstalled: false }), 'hooks')).toMatchObject({ status: 'warn', detail: 'Not installed: the status line' })
   })
 
   it('reads the errors', () => {
@@ -570,6 +607,7 @@ describe('healthView', () => {
     const r = row(healthIn({ procs: { at: NOW, sessions: {}, strays } }), 'strays')
     expect(r).toMatchObject({ status: 'warn', detail: 'vite :5174 from a finished session, and 1 more', action: { type: 'show-strays', label: 'Show' } })
     expect(r!.strays).toHaveLength(2)
+    expect(row(healthIn({ procs: { at: NOW, sessions: {}, strays: [], error: 'lsof failed' } }), 'strays')).toMatchObject({ status: 'warn', detail: 'Could not be read: lsof failed' })
   })
 
   it('reads the worktrees', () => {
@@ -584,6 +622,8 @@ describe('healthView', () => {
     expect(row(healthIn({ update: upd({ phase: 'ready', offer }) }), 'masterdeck')).toMatchObject({ status: 'warn', detail: '0.9.1 is ready to install', action: { type: 'update', label: 'Restart to update' } })
     expect(row(healthIn({ update: upd({ phase: 'error', error: 'offline' }) }), 'masterdeck')).toMatchObject({ status: 'bad', detail: 'Update failed: offline' })
     expect(row(healthIn({ update: upd({ enabled: false }) }), 'masterdeck')).toMatchObject({ status: 'ok', detail: '0.9.0' })
+    expect(row(healthIn({ update: upd({ phase: 'checking' }) }), 'masterdeck')).toMatchObject({ status: 'ok', detail: '0.9.0, checking for updates…' })
+    expect(row(healthIn({ update: upd({ phase: 'installing', offer }) }), 'masterdeck')).toMatchObject({ status: 'warn', detail: 'Installing 0.9.1…' })
   })
 })
 
