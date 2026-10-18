@@ -1124,10 +1124,17 @@ A place for what you would otherwise keep in another app: your own notes, and on
   reads your notes, changes what you wrote or deletes anything. The note shows up in the panel at
   once; if you are typing in that same note, the editor says **Changed elsewhere** as usual. MasterDeck
   must be running (the session is told when it is not). macOS only for now.
-- **A ticket's note:** one per ticket. In a session's **Details** tab, **Add note** (or **Edit
-  note**, with the start of the note above it) opens it; so does the small mark on a ticket's card
-  on the Board (always visible, dimmed, on a phone). Such a note has no title: the panel shows
-  the ticket and its title. It is listed under **Tickets**. Emptying it removes it.
+- **A ticket's note:** one per ticket. In a session's **Details → GitHub**, the **Ticket** row
+  (a **Note** badge on it says the ticket has one) shows the note rendered, with when it was last
+  changed; a long one is cut to a few lines with **Show more**. Click the text (or **Edit**) to
+  change it in place: **Save** or ⌘/Ctrl+Enter saves, **Cancel** or Esc drops the change, and
+  **Delete** asks first. With no note yet, a **Write a note…** box is ready: type and Save. If the
+  note was changed elsewhere since you started (the Notes panel, the Board, a browser), Save says
+  **Changed elsewhere.** with **Reload** (take that text and go on) or **Keep mine**; nothing is
+  overwritten without asking. A change made elsewhere shows up here by itself. **Open in Notes**
+  opens it in the Notes panel, as does the small mark on a ticket's card on the Board (always
+  visible, dimmed, on a phone). Such a note has no title: the panel shows the ticket and its
+  title. It is listed under **Tickets**. Emptying it removes it.
 - **A session's notes (Session details → Notes):** the Details tab has the tabs **Session**, **GitHub**,
   **Notes**, **Diff** and **Files**. **Notes** reads **Notes 3** when the session has notes: its ticket's
   note (listed first, as **Ticket note**), the notes about the session, and the notes about its
@@ -1135,8 +1142,8 @@ A place for what you would otherwise keep in another app: your own notes, and on
   dot on the tab says one came since you last opened that session's Notes tab (each window and
   browser keeps its own). Pick a note to read it, rendered, below the list. **Edit** opens it in the
   Notes panel; **New note** opens the panel on a new note about this session (and its ticket),
-  which the editor shows as **About login-redirect · #112**. Editing is always in the panel, so a
-  note is never open in two editors at once. The web app's Details has the same tab.
+  which the editor shows as **About login-redirect · #112**. Editing is in the panel (only the
+  ticket's own note can also be written in place, under **GitHub → Ticket**). The web app's Details has the same tab.
 - **Filters:** under the search box, **All · Mine · Tickets · Sessions · Meetings**. **Mine** is your
   own notes, about nothing in particular; **Tickets** a ticket's note or a note about a ticket;
   **Sessions** the notes about a session; **Meetings** the notes that came from a meeting. A note can

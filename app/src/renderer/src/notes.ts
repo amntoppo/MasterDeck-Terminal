@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { applyChange, sortNotes, type NoteChange, type NoteMeta } from '@shared/notes'
-import { fullRepo } from '@shared/ticket'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { applyChange, sortNotes, type Note, type NoteChange, type NoteMeta } from '@shared/notes'
+import { NOTE_REREAD_MS } from '@shared/noteFilter'
 import { deck } from './deck'
 import { can } from './web'
 
@@ -12,10 +12,21 @@ export interface NotesList {
   apply(c: NoteChange): void
 }
 
+const ownChanges = new Set<(c: NoteChange) => void>()
+/** A write this window made outside the Notes panel (Details' ticket note): the list takes it without waiting for its event. */
+export function noteApplied(c: NoteChange): void {
+  ownChanges.forEach((f) => f(c))
+}
+
 /** The notes list (titles and previews; never a body), kept current by the store's change event. */
 export function useNotes(ready: boolean): NotesList {
   const [metas, setMetas] = useState<NoteMeta[]>([])
   const [loaded, setLoaded] = useState(false)
+  const apply = useCallback((c: NoteChange) => setMetas((m) => applyChange(m, c)), [])
+  useEffect(() => {
+    ownChanges.add(apply)
+    return () => void ownChanges.delete(apply)
+  }, [apply])
   useEffect(() => {
     if (!ready || !can('notesList')) return
     let live = true
@@ -41,13 +52,48 @@ export function useNotes(ready: boolean): NotesList {
       off()
     }
   }, [ready])
-  const apply = useCallback((c: NoteChange) => setMetas((m) => applyChange(m, c)), [])
   return { metas, loaded, apply }
 }
 
-export function ticketNote(metas: NoteMeta[], repo: string | null | undefined, number: number): NoteMeta | null {
-  const full = fullRepo(repo).toLowerCase()
-  return metas.find((m) => m.ticket && m.ticket.number === number && m.ticket.repo.toLowerCase() === full) ?? null
+export { ticketNote } from '@shared/notes'
+
+/**
+ * A note's full text, read when `id` is set and again when `version` (its `updated`) moves. A change comes with every
+ * autosave while the note is edited somewhere, so that re-read waits until the edits pause; the first read does not.
+ * `failed`: the note is gone or could not be read.
+ */
+export function useNoteBody(id: string | null, version: number): { note: Note | null; failed: boolean } {
+  const [note, setNote] = useState<Note | null>(null)
+  const [failed, setFailed] = useState(false)
+  const lastRead = useRef<string | null>(null)
+  useEffect(() => {
+    if (!id) {
+      lastRead.current = null
+      return setNote(null)
+    }
+    let live = true
+    const read = () =>
+      void deck()
+        .notesGet(id)
+        .then((n) => {
+          if (!live) return
+          // null: the note is gone or unreadable; say so rather than load for ever.
+          if (!n) return setFailed(true)
+          lastRead.current = n.id
+          setFailed(false)
+          setNote(n)
+        })
+        .catch(() => live && setFailed(true))
+    const again = lastRead.current === id
+    if (!again) setFailed(false)
+    const timer = again ? setTimeout(read, NOTE_REREAD_MS) : null
+    if (!timer) read()
+    return () => {
+      live = false
+      if (timer) clearTimeout(timer)
+    }
+  }, [id, version])
+  return { note: note && note.id === id ? note : null, failed }
 }
 
 /** How the editor shows a note: the text, the rendered note, or both next to each other. */
