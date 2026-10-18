@@ -88,6 +88,7 @@ describe('appChanged', () => {
 
   it("matches ota-main.yml's paths-ignore", () => {
     const yml = readFileSync(join(__dirname, '..', '..', '.github', 'workflows', 'ota-main.yml'), 'utf8')
+      .replace(/\r\n/g, '\n') // a Windows checkout has CRLF
     const block = /paths-ignore:\n((?:\s+- .+\n)+)/.exec(yml)?.[1] ?? ''
     const globs = block.split('\n').map((l) => l.trim().replace(/^- '(.*)'$/, '$1')).filter(Boolean)
     expect(globs).toEqual(IGNORED_PATHS)
