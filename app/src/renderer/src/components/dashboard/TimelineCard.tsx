@@ -1,4 +1,5 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ACTIVITY_GROUPS, ACTIVITY_LIST_MAX, TYPE_TAG, activityRows, filterActivity, type ActivityEvent } from '@shared/activityLog'
 import { Card } from './Card'
 import { go, type DashNav } from './nav'
@@ -57,6 +58,7 @@ export const TimelineCard = memo(function TimelineCard({
   nav,
   from,
   recordingSince,
+  compact,
 }: {
   /** The range's events, newest first; null while read. */
   events: ActivityEvent[] | null
@@ -68,6 +70,8 @@ export const TimelineCard = memo(function TimelineCard({
   from: number
   /** When this device first showed the Dashboard: the log has nothing from before it. */
   recordingSince: number | null
+  /** The phone or a narrow window: the kinds and the selects move into a sheet. */
+  compact?: boolean
 }) {
   const [shown, setShown] = useState(PAGE)
   const set = (p: Partial<TimelineFilters>) => {
@@ -103,6 +107,7 @@ export const TimelineCard = memo(function TimelineCard({
       </button>
     )
   }
+  const picked = filters.groups.length + (filters.account ? 1 : 0) + (filters.repo ? 1 : 0)
   const pick = (have: string[], cur: string | null) => (cur && !have.includes(cur) ? [cur, ...have] : have).map((x) => <option key={x} value={x}>{x}</option>)
 
   return (
@@ -113,10 +118,12 @@ export const TimelineCard = memo(function TimelineCard({
       countTip={`Events recorded ${range.words} on this Mac${filtered ? ', of the kinds picked' : ''}`}
       loading={events === null}
     >
-      <div className="dash-tfil" role="group" aria-label="Kinds">
-        {chip(null, 'All')}
-        {ACTIVITY_GROUPS.map((g) => chip(g.id, g.label))}
-      </div>
+      {!compact && (
+        <div className="dash-tfil" role="group" aria-label="Kinds">
+          {chip(null, 'All')}
+          {ACTIVITY_GROUPS.map((g) => chip(g.id, g.label))}
+        </div>
+      )}
       <div className="dash-tfil">
         <div className="seg dash-seg" role="group" aria-label="Range">
           {RANGES.map((r) => (
@@ -125,20 +132,41 @@ export const TimelineCard = memo(function TimelineCard({
             </button>
           ))}
         </div>
-        <label className="dash-sub">
-          Account{' '}
-          <select className="dash-sel" value={filters.account ?? ''} onChange={(e) => set({ account: e.target.value || null })}>
-            <option value="">All accounts</option>
-            {pick(accounts, filters.account)}
-          </select>
-        </label>
-        <label className="dash-sub">
-          Repo{' '}
-          <select className="dash-sel" value={filters.repo ?? ''} onChange={(e) => set({ repo: e.target.value || null })}>
-            <option value="">All repos</option>
-            {pick(repos, filters.repo)}
-          </select>
-        </label>
+        {compact ? (
+          <FilterSheet picked={picked} onReset={() => set({ groups: [], account: null, repo: null })}>
+            <div className="dash-tfil" role="group" aria-label="Kinds">
+              {chip(null, 'All')}
+              {ACTIVITY_GROUPS.map((g) => chip(g.id, g.label))}
+            </div>
+            <label htmlFor="dash-tl-account">Account</label>
+            <select id="dash-tl-account" className="dash-sel" value={filters.account ?? ''} onChange={(e) => set({ account: e.target.value || null })}>
+              <option value="">All accounts</option>
+              {pick(accounts, filters.account)}
+            </select>
+            <label htmlFor="dash-tl-repo">Repo</label>
+            <select id="dash-tl-repo" className="dash-sel" value={filters.repo ?? ''} onChange={(e) => set({ repo: e.target.value || null })}>
+              <option value="">All repos</option>
+              {pick(repos, filters.repo)}
+            </select>
+          </FilterSheet>
+        ) : (
+          <>
+            <label className="dash-sub">
+              Account{' '}
+              <select className="dash-sel" value={filters.account ?? ''} onChange={(e) => set({ account: e.target.value || null })}>
+                <option value="">All accounts</option>
+                {pick(accounts, filters.account)}
+              </select>
+            </label>
+            <label className="dash-sub">
+              Repo{' '}
+              <select className="dash-sel" value={filters.repo ?? ''} onChange={(e) => set({ repo: e.target.value || null })}>
+                <option value="">All repos</option>
+                {pick(repos, filters.repo)}
+              </select>
+            </label>
+          </>
+        )}
       </div>
       {empty ? (
         <div className="dash-empty">{empty}</div>
@@ -184,3 +212,49 @@ export const TimelineCard = memo(function TimelineCard({
     </Card>
   )
 })
+
+/**
+ * The phone's "Filter · All" button and its sheet (the Board's and PRs' sheet styles, PhoneFilters):
+ * the kinds and the selects, which act at once; Done closes it.
+ */
+function FilterSheet({ picked, onReset, children }: { picked: number; onReset: () => void; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+  return (
+    <>
+      <button className={`btn dash-filterbtn${picked ? ' active' : ''}`} aria-haspopup="dialog" onClick={() => setOpen(true)} title={picked ? `${picked} filter${picked === 1 ? '' : 's'} on` : 'Every kind, account and repo'}>
+        Filter · {picked ? picked : 'All'}
+      </button>
+      {open &&
+        createPortal(
+          <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
+            <div className="dialog filters-sheet dash-tl-sheet" role="dialog" aria-label="Timeline filters">
+              <h3>
+                Timeline filters
+                <span style={{ flex: 1 }} />
+                <button className="icon-btn" onClick={() => setOpen(false)} title="Close (Esc)" aria-label="Close">
+                  ×
+                </button>
+              </h3>
+              <div className="filters-sheet-body">{children}</div>
+              <div className="foot">
+                <button className="btn" onClick={onReset} disabled={!picked}>
+                  Reset
+                </button>
+                <span className="grow" />
+                <button className="btn primary" onClick={() => setOpen(false)}>
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  )
+}

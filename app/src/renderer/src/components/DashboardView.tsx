@@ -87,6 +87,18 @@ export interface DashboardProps {
 export function DashboardView(props: DashboardProps) {
   const { state, update } = props
   const phone = usePhone()
+  // The view at 760 px or less (as the CSS container query measures it: a narrow window, panels open) is drawn as the phone
+  // is: one column, Needs attention capped at 5, each card trimmed. A ResizeObserver, not a timer.
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width <= 760))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const compact = phone || narrow
   // To the minute: the state ticks every few seconds; times and sums need not.
   const tick = useNow(MIN)
   const now = Math.floor(tick / MIN) * MIN
@@ -272,11 +284,11 @@ export function DashboardView(props: DashboardProps) {
           sched,
           update,
           dismissed,
-          max: phone ? 5 : 8,
+          max: compact ? 5 : 8,
         },
         now,
       ),
-    [state.inbox, state.sessions, state.prs, state.teamPrs, state.sessionPrs, state.me, logins, state.watches, prWatches, sched, update, dismissed, phone, now],
+    [state.inbox, state.sessions, state.prs, state.teamPrs, state.sessionPrs, state.me, logins, state.watches, prWatches, sched, update, dismissed, compact, now],
   ))
   const subjects = attention.subjects
   const subjectsRef = useRef(subjects)
@@ -393,15 +405,15 @@ export function DashboardView(props: DashboardProps) {
   const card = (id: CardId) => {
     switch (id) {
       case 'now':
-        return <NowCard key={id} view={nowV} now={now} loading={agentsLoading} nav={nav} procsBusy={procsBusy} onRefresh={readProcs} portLinks={portLinks} windows={windows} compact={phone} />
+        return <NowCard key={id} view={nowV} now={now} loading={agentsLoading} nav={nav} procsBusy={procsBusy} onRefresh={readProcs} portLinks={portLinks} windows={windows} compact={compact} />
       case 'timeline':
-        return <TimelineCard key={id} events={shownEvents} filters={filters} onFilters={setFilters} now={now} nav={nav} from={from} recordingSince={since} />
+        return <TimelineCard key={id} events={shownEvents} filters={filters} onFilters={setFilters} now={now} nav={nav} from={from} recordingSince={since} compact={compact} />
       case 'delivery':
-        return <DeliveryCard key={id} view={delivery} loading={!state.board && state.boardLoading} prsRead={state.teamPrsAt !== null || !!state.teamPrsError} nav={nav} compact={phone} />
+        return <DeliveryCard key={id} view={delivery} loading={!state.board && state.boardLoading} prsRead={state.teamPrsAt !== null || !!state.teamPrsError} nav={nav} compact={compact} />
       case 'usage':
-        return <UsageCard key={id} view={usage} nav={nav} compact={phone} />
+        return <UsageCard key={id} view={usage} nav={nav} compact={compact} />
       case 'health':
-        return <HealthCard key={id} view={health} nav={nav} worktreesBusy={janitorBusy} onCheckWorktrees={checkWorktrees} portLinks={portLinks} compact={phone} />
+        return <HealthCard key={id} view={health} nav={nav} worktreesBusy={janitorBusy} onCheckWorktrees={checkWorktrees} portLinks={portLinks} compact={compact} />
     }
   }
 
@@ -418,7 +430,7 @@ export function DashboardView(props: DashboardProps) {
         <span style={{ flex: 1 }} />
         {cust.on ? (
           <>
-            <span className="muted dash-hint">Drag a card by its handle, or press ⌥ and an arrow. The eye hides it.</span>
+            <span className="muted dash-hint">{phone ? 'Move a card with ← and →. The eye hides it.' : 'Drag a card by its handle, or press ⌥ and an arrow. The eye hides it.'}</span>
             <button className="btn" disabled={!cust.canReset} title={cust.canReset ? 'Back to the default order, every card shown' : 'The layout is the default'} onClick={cust.reset}>
               Reset
             </button>
@@ -438,7 +450,7 @@ export function DashboardView(props: DashboardProps) {
           </button>
         )}
       </header>
-      <div className="panel-body dash-body">
+      <div className={`panel-body dash-body${compact ? ' dash-compact' : ''}`} ref={bodyRef}>
         <div className="dash-wrap">
           <AttentionCard
             list={attention}

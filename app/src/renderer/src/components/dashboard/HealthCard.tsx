@@ -110,11 +110,18 @@ export const HealthCard = memo(function HealthCard({
           )}
         </>
       ) : compact ? (
-        problems ? (
-          view.rows.filter((r) => r.status === 'warn' || r.status === 'bad').map(row)
-        ) : (
-          <div className="dash-empty">Nothing is wrong. Some things are not checked yet.</div>
-        )
+        // The phone: the summary alone; Settings → (the card's link) has the rest.
+        <div className="dash-hrow">
+          <span className={`dash-dot dash-d-${view.rows.some((r) => r.status === 'bad') ? 'bad' : problems ? 'warn' : 'wait'}`} />
+          <span className="dash-hdt dash-hsum">
+            {problems
+              ? `${view.summary}: ${view.rows
+                  .filter((r) => r.status === 'warn' || r.status === 'bad')
+                  .map((r) => r.label)
+                  .join(', ')}`
+              : 'Nothing is wrong. Some things are not checked yet.'}
+          </span>
+        </div>
       ) : (
         view.rows.map(row)
       )}

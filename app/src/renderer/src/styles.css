@@ -2160,6 +2160,9 @@ button.dash-kpi:hover { background: var(--bg-4); }
 .dash-lift .dash-handle { cursor: grabbing; }
 .dash-marker { display: none; position: absolute; z-index: 9; border-radius: 2px; background: var(--accent); pointer-events: none; }
 .dash-hidden-ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--muted); font-size: 12.5px; }
+.dash-filterbtn.active { border-color: var(--accent); background: var(--accent-soft); }
+/* Two columns or more: Now scrolls inside past 380 px, so a long list does not leave a tall hole beside the next card. */
+@container (min-width: 737px) { .dash-grid > .dash-now > .dash-cb { max-height: 380px; overflow-y: auto; } }
 
 /* One column at a phone's width or a narrow window (after the rules it overrides). */
 @container (max-width: 760px) {

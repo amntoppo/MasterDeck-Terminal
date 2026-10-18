@@ -21,7 +21,7 @@ const STAGE_TIP: Record<string, string> = {
   approved: 'Your open PRs that are approved',
 }
 
-function Columns({ columns, total }: { columns: ColumnCount[]; total: number }) {
+function Columns({ columns, total, compact }: { columns: ColumnCount[]; total: number; compact?: boolean }) {
   return (
     <>
       <div className="dash-bar" title={`${total} ticket${total === 1 ? '' : 's'}`}>
@@ -29,13 +29,13 @@ function Columns({ columns, total }: { columns: ColumnCount[]; total: number }) 
           c.count ? <span key={c.name} style={{ width: `${(c.count / Math.max(1, total)) * 100}%`, background: colourOf(c, i) }} /> : null,
         )}
       </div>
-      <div className="dash-legend">
+      {!compact && <div className="dash-legend">
         {columns.map((c, i) => (
           <span key={c.name} title={`Tickets in ${c.name}`}>
             <span className="dash-dot" style={{ background: colourOf(c, i) }} /> {c.name} {c.count}
           </span>
         ))}
-      </div>
+      </div>}
     </>
   )
 }
@@ -72,7 +72,7 @@ export const DeliveryCard = memo(function DeliveryCard({
       ) : sp.kind === 'derived' ? (
         <>
           <div className="dash-sub">{sp.text}</div>
-          <Columns columns={sp.columns} total={sp.total} />
+          <Columns columns={sp.columns} total={sp.total} compact={compact} />
         </>
       ) : (
         <>
@@ -82,7 +82,7 @@ export const DeliveryCard = memo(function DeliveryCard({
               {sp.total} ticket{sp.total === 1 ? '' : 's'}
             </span>
           </div>
-          <Columns columns={sp.columns} total={sp.total} />
+          <Columns columns={sp.columns} total={sp.total} compact={compact} />
           {sp.burndown && !compact && (
             <div>
               <div className="dash-sub dash-line">

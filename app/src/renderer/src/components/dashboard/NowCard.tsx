@@ -84,6 +84,17 @@ export const NowCard = memo(function NowCard({
         </div>
       )}
 
+      {compact && (
+        <div className="dash-mini dash-muted dash-nowsum">
+          {[
+            view.procs && !windows ? `${ports} port${ports === 1 ? '' : 's'} open` : null,
+            view.watching.length ? `${view.watching.length} watched` : null,
+            view.nextRuns[0] ? `next: ${view.nextRuns[0].name} ${view.nextRuns[0].when}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ') || 'Nothing watched or scheduled'}
+        </div>
+      )}
       {!compact && (
         <>
           <div className="dash-sec">Processes and ports</div>

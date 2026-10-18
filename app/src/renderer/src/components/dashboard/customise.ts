@@ -15,9 +15,16 @@ interface Drag {
   y: number
   handle: HTMLElement
   card: HTMLElement | null
-  /** The other shown cards' boxes and the grid's, taken when the drag starts. */
+  /**
+   * The other shown cards' boxes, taken when the drag starts, relative to the grid: the page may
+   * scroll during the drag, and the grid's own box is read again on each move.
+   */
   rects: CardRect[]
-  grid: DOMRect | null
+  /** Where the grid was when the drag started (viewport). */
+  grid0: { left: number; top: number }
+  /** The pointer's last place, for a scroll without a move. */
+  px: number
+  py: number
   across: boolean
   live: boolean
   drop: Drop | null
@@ -86,19 +93,23 @@ export function useCustomise(key: string) {
     if (d.live) swallowClick()
   }, [])
 
-  const place = (d: Drag) => {
+  /** The card follows the pointer (and any scroll since the start); the marker shows the drop. */
+  const follow = (d: Drag) => {
+    const g = gridRef.current?.getBoundingClientRect()
+    if (!g) return
+    if (d.card) d.card.style.transform = `translate(${d.px - d.x - (g.left - d.grid0.left)}px, ${d.py - d.y - (g.top - d.grid0.top)}px)`
+    d.drop = dropNearest(d.rects, d.px - g.left, d.py - g.top)
     const m = markerRef.current
     const drop = d.drop
-    if (!m || !drop || !d.grid) return
+    if (!m || !drop) return
     const r = d.rects[drop.index]
-    const g = d.grid
     m.style.display = 'block'
     if (d.across) {
-      const x = (drop.after ? r.left + r.width + HALF_GAP : r.left - HALF_GAP) - g.left
-      Object.assign(m.style, { left: `${x - 1.5}px`, top: `${r.top - g.top}px`, width: '3px', height: `${r.height}px` })
+      const x = drop.after ? r.left + r.width + HALF_GAP : r.left - HALF_GAP
+      Object.assign(m.style, { left: `${x - 1.5}px`, top: `${r.top}px`, width: '3px', height: `${r.height}px` })
     } else {
-      const y = (drop.after ? r.top + r.height + HALF_GAP : r.top - HALF_GAP) - g.top
-      Object.assign(m.style, { left: `${r.left - g.left}px`, top: `${y - 1.5}px`, width: `${r.width}px`, height: '3px' })
+      const y = drop.after ? r.top + r.height + HALF_GAP : r.top - HALF_GAP
+      Object.assign(m.style, { left: `${r.left}px`, top: `${y - 1.5}px`, width: `${r.width}px`, height: '3px' })
     }
   }
 
@@ -115,7 +126,9 @@ export function useCustomise(key: string) {
           handle: e.currentTarget,
           card: e.currentTarget.closest<HTMLElement>('.dash-card'),
           rects: [],
-          grid: null,
+          grid0: { left: 0, top: 0 },
+          px: e.clientX,
+          py: e.clientY,
           across: false,
           live: false,
           drop: null,
@@ -130,12 +143,13 @@ export function useCustomise(key: string) {
             // Let go outside the window before it became a drag: no button is down any more.
             if (!ev.buttons) return cancel()
             const grid = gridRef.current
-            d.grid = grid?.getBoundingClientRect() ?? null
+            const g = grid?.getBoundingClientRect()
+            d.grid0 = { left: g?.left ?? 0, top: g?.top ?? 0 }
             d.rects = [...(grid?.querySelectorAll<HTMLElement>('[data-card]') ?? [])]
               .filter((el) => el.dataset.card !== id)
               .map((el) => {
                 const r = el.getBoundingClientRect()
-                return { id: el.dataset.card as CardId, left: r.left, top: r.top, width: r.width, height: r.height }
+                return { id: el.dataset.card as CardId, left: r.left - d.grid0.left, top: r.top - d.grid0.top, width: r.width, height: r.height }
               })
             d.across = d.rects.some((a, i) => d.rects.some((b, j) => i < j && overlapY(a, b)))
             d.live = true
@@ -146,10 +160,11 @@ export function useCustomise(key: string) {
             }
             d.card?.classList.add('dash-lift')
           }
-          if (d.card) d.card.style.transform = `translate(${dx}px, ${dy}px)`
-          d.drop = dropNearest(d.rects, ev.clientX, ev.clientY)
-          place(d)
+          d.px = ev.clientX
+          d.py = ev.clientY
+          follow(d)
         }
+        const scrolled = () => drag.current === d && d.live && follow(d)
         const up = (ev: PointerEvent) => {
           if (ev.pointerId !== d.pointer || drag.current !== d) return
           const { live, drop } = d
@@ -165,8 +180,10 @@ export function useCustomise(key: string) {
         window.addEventListener('pointerup', up)
         window.addEventListener('pointercancel', cancelEv)
         window.addEventListener('blur', lost)
+        window.addEventListener('scroll', scrolled, true)
         d.handle.addEventListener('lostpointercapture', lost)
         d.cleanup = () => {
+          window.removeEventListener('scroll', scrolled, true)
           window.removeEventListener('pointermove', move)
           window.removeEventListener('pointerup', up)
           window.removeEventListener('pointercancel', cancelEv)

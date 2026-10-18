@@ -92,7 +92,7 @@ export const UsageCard = memo(function UsageCard({ view, nav, compact }: { view:
           </div>
         </>
       )}
-      {view.warnings.map((w) => {
+      {!compact && view.warnings.map((w) => {
         const a = w.action
         return (
           <div key={w.id} className="dash-warn">
