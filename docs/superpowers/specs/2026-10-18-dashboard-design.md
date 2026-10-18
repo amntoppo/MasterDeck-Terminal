@@ -163,7 +163,7 @@ interface AttentionList { items: AttentionItem[]; total: number; now: number; mo
 
 | Item | Buttons |
 |---|---|
-| Needs-you item | Its own `actions` through a shared **`InboxActions`** component: the compact reply field, options, menu answers and primary button the Needs-you card draws. It is extracted from `Sidebar.tsx`, with no change in behaviour, and acts with `inboxAct` → `runInboxAction`. Plus **Open** (the session). |
+| Needs-you item | Its primary action (`inboxAct`), **Open** (the session) and **Reply…**, which expands the real Needs-you card (`InboxCard`, moved unchanged from `Sidebar.tsx` into `InboxCard.tsx`) under the row, so every kind (menu answers, options, proposals, trust…) acts exactly as in the Needs-you list, through `inboxAct` → `runInboxAction`. |
 | My PR (CI, changes, threads) | **Open PR** (`openPr`), and **Open session** when a session owns it (`ownerOf`, shared/offers.ts) |
 | Review request | **Review** (`openPr(url, …, review = true)`) |
 | Ready to merge | **Merge…** (`openPr`; the web app opens GitHub) |
@@ -495,7 +495,7 @@ New:
 - `main/activity.ts` (+ test)
 - `renderer/src/components/DashboardView.tsx`
 - `renderer/src/components/dashboard/{Card,AttentionCard,NowCard,TimelineCard,DeliveryCard,UsageCard,HealthCard,Sparkline}.tsx`
-- `renderer/src/components/InboxActions.tsx`
+- `renderer/src/components/InboxCard.tsx` (moved from `Sidebar.tsx`, unchanged)
 
 Changed:
 
@@ -522,7 +522,7 @@ Changed:
   - `main/sessionProcs.ts` (`listAll`, strays)
   - `shared/costs.ts` + `main/sources.ts` (`account`)
 - Sidebar:
-  - `Sidebar.tsx` (uses `InboxActions`)
+  - `Sidebar.tsx` (imports `InboxCard`)
 - Styles and preview:
   - `styles.css`
   - `web/web.css`
