@@ -7,7 +7,7 @@
 
 export type CardId = 'now' | 'timeline' | 'delivery' | 'usage' | 'health'
 
-export const DASH_DEFAULT: readonly CardId[] = ['now', 'timeline', 'delivery', 'usage', 'health']
+export const DASH_DEFAULT: readonly CardId[] = ['now', 'delivery', 'timeline', 'usage', 'health']
 
 /** `{ order: [], hidden: [] }` is the default, so a later default applies in full. */
 export interface Layout {

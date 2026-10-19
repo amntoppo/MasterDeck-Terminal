@@ -2006,8 +2006,10 @@ details.sd-more > summary:hover { color: var(--text); }
 /* Needs attention runs full width above a grid of the other cards; the grid's container width decides its columns. */
 .panel .dash-body { container-type: inline-size; padding: 16px 20px 32px; }
 .dash-wrap { display: flex; flex-direction: column; gap: 16px; }
-.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); grid-auto-flow: row dense; gap: 16px; align-items: start; }
-@container (min-width: 800px) { .dash-grid > .dash-timeline { grid-column: span 2; } }
+/* Two columns (one at 760 px or less, below), filled in DOM order, never `dense`: the screen's order is
+   the order Customise's ← → and Tab follow. Timeline takes a whole row. */
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.dash-grid > .dash-timeline { grid-column: 1 / -1; }
 .dash-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; }
 .dash-ch { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
 .dash-ct { font-size: 13px; font-weight: 600; margin: 0; white-space: nowrap; }
@@ -2161,8 +2163,8 @@ button.dash-kpi:hover { background: var(--bg-4); }
 .dash-marker { display: none; position: absolute; z-index: 9; border-radius: 2px; background: var(--accent); pointer-events: none; }
 .dash-hidden-ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--muted); font-size: 12.5px; }
 .dash-filterbtn.active { border-color: var(--accent); background: var(--accent-soft); }
-/* Two columns or more: Now scrolls inside past 380 px, so a long list does not leave a tall hole beside the next card. */
-@container (min-width: 737px) { .dash-grid > .dash-now > .dash-cb { max-height: 380px; overflow-y: auto; } }
+/* Two columns: Now scrolls inside past 380 px, so a long list does not leave a tall hole beside the next card. */
+@container (min-width: 761px) { .dash-grid > .dash-now > .dash-cb { max-height: 380px; overflow-y: auto; } }
 
 /* One column at a phone's width or a narrow window (after the rules it overrides). */
 @container (max-width: 760px) {

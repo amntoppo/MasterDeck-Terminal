@@ -33,10 +33,13 @@ export const HealthCard = memo(function HealthCard({
     else if (a.type === 'view') nav.view(a.view)
     else if (a.type === 'show-strays') setStrays((v) => !v)
     else if (a.type === 'check-worktrees') onCheckWorktrees()
-    else if (a.type === 'update')
+    else if (a.type === 'update') {
+      setMsg(null)
       void deck()
         .updateRestart()
         .then((r) => setMsg(r.ok ? null : (r.message ?? 'The update could not start.')))
+        .catch((e) => setMsg(`The update could not start: ${e instanceof Error ? e.message : String(e)}`))
+    }
   }
 
   const row = (r: HealthRow) => (

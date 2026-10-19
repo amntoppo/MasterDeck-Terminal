@@ -41,6 +41,10 @@ describe('layoutOrder', () => {
     expect(layoutOrder(EMPTY)).toEqual(D)
   })
 
+  it('the default draws two columns in reading order: Now | Delivery, Timeline, Usage | Health', () => {
+    expect(D).toEqual(['now', 'delivery', 'timeline', 'usage', 'health'])
+  })
+
   it('keeps a saved order', () => {
     const order: CardId[] = ['health', 'usage', 'delivery', 'timeline', 'now']
     expect(layoutOrder({ order, hidden: [] })).toEqual(order)
@@ -51,8 +55,8 @@ describe('layoutOrder', () => {
     expect(layoutOrder({ order: ['health', 'now', 'timeline', 'usage'], hidden: [] })).toEqual([
       'health',
       'now',
-      'timeline',
       'delivery',
+      'timeline',
       'usage',
     ])
   })
@@ -63,14 +67,14 @@ describe('layoutOrder', () => {
 
   it('cleans what it is given', () => {
     const raw = { order: ['x', 'usage', 'usage', 'now'], hidden: [] } as unknown as Layout
-    expect(layoutOrder(raw)).toEqual(['usage', 'health', 'now', 'timeline', 'delivery'])
+    expect(layoutOrder(raw)).toEqual(['usage', 'health', 'now', 'delivery', 'timeline'])
   })
 })
 
 describe('moveTo', () => {
   it('moves a card forward and back', () => {
-    expect(moveTo(D, 'usage', 0)).toEqual(['usage', 'now', 'timeline', 'delivery', 'health'])
-    expect(moveTo(D, 'now', 2)).toEqual(['timeline', 'now', 'delivery', 'usage', 'health'])
+    expect(moveTo(D, 'usage', 0)).toEqual(['usage', 'now', 'delivery', 'timeline', 'health'])
+    expect(moveTo(D, 'now', 2)).toEqual(['delivery', 'now', 'timeline', 'usage', 'health'])
   })
 
   it('to the end, and clamped past the ends', () => {
@@ -80,16 +84,16 @@ describe('moveTo', () => {
   })
 
   it('in place, or an unknown id, changes nothing', () => {
-    expect(moveTo(D, 'delivery', 2)).toEqual(D)
-    expect(moveTo(D, 'delivery', 3)).toEqual(D)
+    expect(moveTo(D, 'timeline', 2)).toEqual(D)
+    expect(moveTo(D, 'timeline', 3)).toEqual(D)
     expect(moveTo(D, 'nope' as CardId, 0)).toEqual(D)
   })
 })
 
 describe('moveStep', () => {
   it('swaps with the neighbour', () => {
-    expect(moveStep(D, 'timeline', 1)).toEqual(['now', 'delivery', 'timeline', 'usage', 'health'])
-    expect(moveStep(D, 'timeline', -1)).toEqual(['timeline', 'now', 'delivery', 'usage', 'health'])
+    expect(moveStep(D, 'timeline', 1)).toEqual(['now', 'delivery', 'usage', 'timeline', 'health'])
+    expect(moveStep(D, 'timeline', -1)).toEqual(['now', 'timeline', 'delivery', 'usage', 'health'])
   })
 
   it('stops at the ends', () => {
@@ -98,7 +102,7 @@ describe('moveStep', () => {
   })
 
   it('passes over hidden cards, which keep their place', () => {
-    expect(moveStep(D, 'timeline', 1, (id) => id !== 'delivery')).toEqual(['now', 'delivery', 'usage', 'timeline', 'health'])
+    expect(moveStep(D, 'now', 1, (id) => id !== 'delivery')).toEqual(['delivery', 'timeline', 'now', 'usage', 'health'])
     // The last shown card does not move past hidden ones at the end.
     expect(moveStep(D, 'usage', 1, (id) => id !== 'health')).toEqual(D)
   })
@@ -199,9 +203,9 @@ describe('dropNearest', () => {
 
   it('dropTo turns a drop into an index for moveTo', () => {
     const d = dropNearest(rects, 330, 140)
-    expect(d && moveTo(D, 'now', dropTo(D, d))).toEqual(['timeline', 'delivery', 'usage', 'health', 'now'])
+    expect(d && moveTo(D, 'now', dropTo(D, d))).toEqual(['delivery', 'timeline', 'usage', 'health', 'now'])
     const b = dropNearest(rects, 130, 140)
-    expect(b && moveTo(D, 'health', dropTo(D, b))).toEqual(['now', 'timeline', 'delivery', 'health', 'usage'])
+    expect(b && moveTo(D, 'health', dropTo(D, b))).toEqual(['now', 'delivery', 'timeline', 'health', 'usage'])
     expect(dropTo(D, { id: 'gone' as CardId, index: 0, after: false })).toBe(D.length)
   })
 })

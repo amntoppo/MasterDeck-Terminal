@@ -1,35 +1,9 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ACTIVITY_GROUPS, ACTIVITY_LIST_MAX, TYPE_TAG, activityRows, filterActivity, type ActivityEvent } from '@shared/activityLog'
 import { Card } from './Card'
 import { go, type DashNav } from './nav'
-
-export type TimelineRange = 'today' | 'yesterday' | '7d'
-
-/** The Timeline's filters, kept per device in `md.dashboard.timeline`. */
-export interface TimelineFilters {
-  range: TimelineRange
-  /** ActivityGroup ids; empty: All. */
-  groups: string[]
-  account: string | null
-  repo: string | null
-}
-
-export const DEFAULT_TIMELINE: TimelineFilters = { range: 'today', groups: [], account: null, repo: null }
-
-/** A saved value, checked: anything unreadable is the default. */
-export function cleanTimeline(raw: unknown): TimelineFilters {
-  if (!raw || typeof raw !== 'object') return DEFAULT_TIMELINE
-  const r = raw as Record<string, unknown>
-  const str = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 200) : null)
-  const known = new Set(ACTIVITY_GROUPS.map((g) => g.id as string))
-  return {
-    range: r.range === 'yesterday' || r.range === '7d' ? r.range : 'today',
-    groups: Array.isArray(r.groups) ? [...new Set(r.groups.filter((g): g is string => typeof g === 'string' && known.has(g)))] : [],
-    account: str(r.account),
-    repo: str(r.repo),
-  }
-}
+import type { TimelineFilters, TimelineRange } from './timeline'
 
 const RANGES: { id: TimelineRange; label: string; words: string }[] = [
   { id: 'today', label: 'Today', words: 'today' },
@@ -227,25 +201,39 @@ export const TimelineCard = memo(function TimelineCard({
 
 /**
  * The phone's "Filter · All" button and its sheet (the Board's and PRs' sheet styles, PhoneFilters):
- * the kinds and the selects, which act at once; Done closes it.
+ * the kinds and the selects, which act at once; Done, ×, Esc or a press outside close it. A modal
+ * dialog: focus moves into it when it opens and back to the button when it closes.
  */
 function FilterSheet({ picked, onReset, children }: { picked: number; onReset: () => void; children: ReactNode }) {
   const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
+  const sheet = useRef<HTMLDivElement>(null)
+  const wasOpen = useRef(false)
   useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    if (!open) {
+      if (wasOpen.current) button.current?.focus()
+      wasOpen.current = false
+      return
+    }
+    wasOpen.current = true
+    sheet.current?.querySelector<HTMLElement>('.filters-sheet-body button, .filters-sheet-body select')?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      setOpen(false)
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
   return (
     <>
-      <button className={`btn dash-filterbtn${picked ? ' active' : ''}`} aria-haspopup="dialog" onClick={() => setOpen(true)} title={picked ? `${picked} filter${picked === 1 ? '' : 's'} on` : 'Every kind, account and repo'}>
+      <button ref={button} className={`btn dash-filterbtn${picked ? ' active' : ''}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} title={picked ? `${picked} filter${picked === 1 ? '' : 's'} on` : 'Every kind, account and repo'}>
         Filter · {picked ? picked : 'All'}
       </button>
       {open &&
         createPortal(
           <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
-            <div className="dialog filters-sheet dash-tl-sheet" role="dialog" aria-label="Timeline filters">
+            <div ref={sheet} className="dialog filters-sheet dash-tl-sheet" role="dialog" aria-modal="true" aria-label="Timeline filters">
               <h3>
                 Timeline filters
                 <span style={{ flex: 1 }} />

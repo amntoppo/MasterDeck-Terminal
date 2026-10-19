@@ -2,6 +2,7 @@ import { memo, useState, type ReactNode } from 'react'
 import { type AttentionAction, type AttentionItem, type AttentionList, type Tier } from '@shared/dashboard'
 import { deck } from '../../deck'
 import { ago, Skeleton } from './Card'
+import { rowActions } from './attention'
 import { go, type DashNav } from './nav'
 
 const TIER_LABEL: Record<Tier, string> = { now: 'Now', soon: 'Soon', ready: 'Ready', info: 'Info' }
@@ -11,13 +12,6 @@ const TIER_TIP: Record<Tier, string> = {
   ready: 'Ready for you, nothing is wrong',
   info: 'For your information',
 }
-
-/**
- * Inbox actions the row's button can run as they are: no text, choice or confirmation needed, and
- * nothing the renderer must open first. Every other kind is answered in the real Needs-you card
- * under the row (Reply…), so it acts exactly as in the Needs-you list.
- */
-const DIRECT = new Set(['continue', 'compact', 'reload', 'loop-more', 'loop-continue', 'approve', 'send'])
 
 const clock = (t: number) => new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
 
@@ -33,6 +27,7 @@ export const AttentionCard = memo(function AttentionCard({
   onDismiss,
   dismissedCount,
   onUndismiss,
+  trusting,
 }: {
   list: AttentionList
   now: number
@@ -48,6 +43,8 @@ export const AttentionCard = memo(function AttentionCard({
   /** Derived items hidden on this device that are still present. */
   dismissedCount: number
   onUndismiss: () => void
+  /** Inbox ids of starts held for a folder's trust: their Try again is left to Reply…. */
+  trusting: ReadonlySet<string>
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ id: string; text: string } | null>(null)
@@ -74,9 +71,13 @@ export const AttentionCard = memo(function AttentionCard({
     }
   }
   const dismiss = (item: AttentionItem) => {
-    if (item.inboxId) void deck().inboxAct(item.inboxId, 'dismiss')
-    else onDismiss(item)
     if (replyId === item.id) onReply(null)
+    if (!item.inboxId) return onDismiss(item)
+    setMsg(null)
+    void deck()
+      .inboxAct(item.inboxId, 'dismiss')
+      .then((r) => !r.ok && setMsg({ id: item.id, text: ('message' in r && r.message) || 'Could not dismiss it.' }))
+      .catch((e) => setMsg({ id: item.id, text: `Could not dismiss it: ${e instanceof Error ? e.message : String(e)}` }))
   }
 
   const count = list.total
@@ -113,8 +114,7 @@ export const AttentionCard = memo(function AttentionCard({
           <div className="dash-arows">
             {list.items.map((item) => {
               const open = replyId === item.id
-              const direct = item.actions.filter((a) => a.type !== 'inbox' || DIRECT.has(a.action))
-              const answerHere = !!item.inboxId && item.actions.some((a) => a.type === 'inbox' && !DIRECT.has(a.action))
+              const { direct, answerHere } = rowActions(item, trusting)
               return (
                 <div key={item.id} className="dash-arow-wrap">
                   <div className="dash-arow">
@@ -141,7 +141,7 @@ export const AttentionCard = memo(function AttentionCard({
                         </button>
                       )}
                     </span>
-                    <button className="dash-x" aria-label="Dismiss" title={item.inboxId ? 'Dismiss (it comes back if the situation changes)' : 'Dismiss on this device (it comes back when it changes)'} onClick={() => dismiss(item)}>
+                    <button className="dash-x" aria-label={`Dismiss: ${item.title}`} title={item.inboxId ? 'Dismiss (it comes back if the situation changes)' : 'Dismiss on this device (it comes back when it changes)'} onClick={() => dismiss(item)}>
                       ×
                     </button>
                   </div>

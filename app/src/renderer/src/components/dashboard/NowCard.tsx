@@ -4,17 +4,9 @@ import { AccountBadge } from '../AccountBits'
 import { deck } from '../../deck'
 import { ago, Card } from './Card'
 import { go, type DashNav } from './nav'
+import { duration } from './text'
 
 const DOT: Record<NowChip, string> = { working: 'work', background: 'busy', waiting: 'wait', 'needs-you': 'bad' }
-
-/** "18 min", "3 h 46 min", "2 d". */
-export function duration(ms: number): string {
-  const m = Math.max(0, Math.floor(ms / 60_000))
-  if (m < 60) return `${m} min`
-  const h = Math.floor(m / 60)
-  if (h < 48) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`
-  return `${Math.floor(h / 24)} d`
-}
 
 /** Now (#183): sessions at work, their ports, what is watched, and the next scheduled runs. */
 export const NowCard = memo(function NowCard({

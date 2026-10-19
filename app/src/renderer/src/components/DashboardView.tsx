@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ACTIVITY_COALESCE_MS, mergeActivity, type ActivityEvent } from '@shared/activityLog'
+import { mergeActivity, type ActivityEvent } from '@shared/activityLog'
 import { attentionItems, deliveryView, healthView, nowView, pruneDismissed, usageView, type AttentionItem, type Dismissal } from '@shared/dashboard'
 import type { CardId } from '@shared/dashboardLayout'
 import { formatRefreshed } from '@shared/format'
 import type { JanitorRow } from '@shared/ipc'
 import type { SchedList } from '@shared/sched'
 import type { ProcsAll } from '@shared/sessionProcs'
-import { parseSavedPrTabs } from '@shared/teamPrs'
 import type { Ticket } from '@shared/ticket'
 import { midnight } from '@shared/timeline'
 import type { TokensByDay } from '@shared/tokens'
 import type { AppState, Issue, Session } from '@shared/types'
 import type { UpdateState } from '@shared/updates'
 import { deck, load, save, useNow } from '../deck'
+import { prTabFor } from '../prPresets'
 import { useStable } from '../useStable'
 import { can, isWeb, usePhone } from '../web'
 import { AttentionCard } from './dashboard/AttentionCard'
@@ -22,7 +22,8 @@ import { DeliveryCard } from './dashboard/DeliveryCard'
 import { HealthCard } from './dashboard/HealthCard'
 import type { DashNav } from './dashboard/nav'
 import { NowCard } from './dashboard/NowCard'
-import { cleanTimeline, TimelineCard, type TimelineFilters } from './dashboard/TimelineCard'
+import { TimelineCard } from './dashboard/TimelineCard'
+import { cleanTimeline, timelineSince, type TimelineFilters } from './dashboard/timeline'
 import { UsageCard } from './dashboard/UsageCard'
 import { liveDirs } from './HygieneViews'
 import { InboxCard } from './InboxCard'
@@ -65,7 +66,8 @@ const atWork = (s: Session) => s.state === 'working' || s.state === 'needs-input
 
 const CARD_TITLE: Record<CardId, string> = { now: 'Now', timeline: 'Timeline', delivery: 'Delivery', usage: 'Usage and cost', health: 'Health' }
 
-const PR_TAB_NAME = { mine: 'Mine', review: 'Needs my review', merged: 'Recently merged' } as const
+/** The PRs view's preset each Delivery count opens. */
+const PR_PRESET = { mine: 'Mine', review: 'Needs my review', merged: 'Recently merged' } as const
 
 export interface DashboardProps {
   state: AppState
@@ -104,8 +106,8 @@ export function DashboardView(props: DashboardProps) {
   const now = Math.floor(tick / MIN) * MIN
 
   // App's callbacks change on every render; the cards get one object that calls the latest.
-  const latest = useRef({ props, sessions: state.sessions })
-  latest.current = { props, sessions: state.sessions }
+  const latest = useRef({ props, sessions: state.sessions, accounts: state.config.accounts })
+  latest.current = { props, sessions: state.sessions, accounts: state.config.accounts }
   const nav = useMemo<DashNav>(() => {
     const p = () => latest.current.props
     return {
@@ -119,11 +121,15 @@ export function DashboardView(props: DashboardProps) {
       view: (v) => p().onView(v),
       settings: (section) => p().onSettings(section),
       needsYou: () => p().onNeedsYou(),
+      // The tab whose filters are the preset (the primary's, with two or more accounts: the counts
+      // are everyone's), whatever it is called; none: a new tab on the preset.
       prsTab: (tab) => {
-        const name = PR_TAB_NAME[tab]
-        const tabs = parseSavedPrTabs(load<unknown>('prTabs', null))
-        const t = tabs ? tabs.find((x) => x.name === name) : tab === 'mine' ? { id: 'prs-mine' } : undefined
-        if (t) save('prTab', t.id)
+        const accts = latest.current.accounts
+        const logins = accts.map((a) => a.login)
+        const primary = (accts.find((a) => a.primary) ?? accts[0])?.login ?? null
+        const r = prTabFor(load<unknown>('prTabs', null), PR_PRESET[tab], { logins, primary, account: primary })
+        if (r.tabs) save('prTabs', r.tabs)
+        save('prTab', r.id)
         p().onView('prs')
       },
       note: (id) => p().onNote(id),
@@ -258,9 +264,10 @@ export function DashboardView(props: DashboardProps) {
       alive = false
     }
   }, [rangeKey, fullRead]) // eslint-disable-line react-hooks/exhaustive-deps
-  // On activity:changed, only what is new: from 15 minutes before the newest event shown (a
-  // coalesced event moves later and keeps its id), merged in by id. Only a range still open can
-  // gain events (not Yesterday). The web reads at most every 15 s; the window as they come.
+  // On activity:changed, only what is new (timelineSince: from 15 minutes before the newest event
+  // shown, or an hour and a quarter back, for an event recorded late), merged in by id. Only a
+  // range still open can gain events (not Yesterday). The web reads at most every 15 s; the window
+  // as they come.
   useEffect(() => {
     if (!can('onActivityChanged') || !can('activityList')) return
     const gap = isWeb() ? 15_000 : 0
@@ -280,7 +287,7 @@ export function DashboardView(props: DashboardProps) {
       }
       busy = true
       last = Date.now()
-      const since = Math.max(r.from, (cur.list[0]?.at ?? r.from) - ACTIVITY_COALESCE_MS)
+      const since = timelineSince(r.from, cur.list[0]?.at, last)
       void deck()
         .activityList(since, r.until)
         .then((fresh) => alive && setEvents((e) => (e && e.key === r.key ? { key: r.key, list: mergeActivity(e.list, fresh, r.from) } : e)))
@@ -357,10 +364,21 @@ export function DashboardView(props: DashboardProps) {
     },
     [],
   )
+  // Only the dismissals the card counts (its subjects still present); the others wait for theirs.
   const undismiss = useCallback(() => {
-    setDismissed([])
-    save(DISMISSED_KEY, [])
+    const here = new Set(subjectsRef.current)
+    setDismissed((cur) => {
+      const next = cur.filter((d) => !here.has(d.id))
+      save(DISMISSED_KEY, next)
+      return next
+    })
   }, [])
+  // Starts held for a folder's trust: the row leaves their Try again to the Needs-you card.
+  const trustKey = state.inbox.open
+    .filter((e) => e.item.actions.some((a) => a.type === 'trust'))
+    .map((e) => e.item.id)
+    .join('\n')
+  const trusting = useMemo(() => new Set(trustKey ? trustKey.split('\n') : []), [trustKey])
 
   // Reply…: the real Needs-you card under its row. It needs the whole state, so it is drawn here.
   const [replyId, setReplyId] = useState<string | null>(null)
@@ -368,19 +386,15 @@ export function DashboardView(props: DashboardProps) {
   useEffect(() => {
     if (replyId && !replyEntry) setReplyId(null)
   }, [replyId, replyEntry])
-  // Drawn again when its item or what the Needs-you cards read (sessions, issues, board, menus)
-  // changes, not on every push. ponytail: a card reading another slice sees it as of that draw;
-  // passing the whole state each time is the upgrade, at the cost of AttentionCard's memo.
-  const replySessions = useStable(replyEntry ? state.sessions : null)
-  const replyIssues = useStable(replyEntry ? state.issues : null)
-  const replyBoard = useStable(replyEntry ? state.board : null)
-  const replyMenus = useStable(replyEntry ? [state.menus, state.asks, state.proposals] : null)
+  // Drawn again on every push while it is open (each push is a fresh state, compared by reference:
+  // nothing is serialised), so it reads the state as it is; while none is open, never.
+  const replyState = replyEntry ? state : null
   const reply = useMemo(
     () =>
-      replyEntry ? (
+      replyEntry && replyState ? (
         <InboxCard
           entry={replyEntry}
-          state={latestState.current}
+          state={replyState}
           onOpenSession={(s) => latest.current.props.onOpenSession(s)}
           onIssue={(i) => latest.current.props.onIssue(i)}
           onStartWith={(i, t) => latest.current.props.onStartWith(i, t)}
@@ -388,7 +402,7 @@ export function DashboardView(props: DashboardProps) {
           full={false}
         />
       ) : null,
-    [replyEntry, replySessions, replyIssues, replyBoard, replyMenus], // eslint-disable-line react-hooks/exhaustive-deps
+    [replyEntry, replyState],
   )
 
   // ---- The other cards' slices
@@ -483,7 +497,7 @@ export function DashboardView(props: DashboardProps) {
             <button className="btn" disabled={!cust.canReset} title={cust.canReset ? 'Back to the default order, every card shown' : 'The layout is the default'} onClick={cust.reset}>
               Reset
             </button>
-            <button className="btn primary" onClick={() => cust.setOn(false)}>
+            <button className="btn primary" ref={cust.doneRef} onClick={() => cust.setOn(false)}>
               Done
             </button>
           </>
@@ -512,19 +526,20 @@ export function DashboardView(props: DashboardProps) {
             onDismiss={dismiss}
             dismissedCount={dismissedHere}
             onUndismiss={undismiss}
+            trusting={trusting}
           />
           <CustomiseCtx.Provider value={cust.ctx}>
             <div className={`dash-grid${cust.on ? ' dash-customising' : ''}`} ref={cust.gridRef} onKeyDown={cust.onKeyDown}>
               {cust.shown.map(card)}
               {cust.on &&
                 cust.hidden.map((id) => (
-                  <div key={`hidden:${id}`} className="dash-hidden-ph">
+                  <div key={`hidden:${id}`} className="dash-hidden-ph" data-hidden={id}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                       <path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.1 6.1C3.6 7.8 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1" />
                     </svg>
                     <span>{CARD_TITLE[id]} is hidden</span>
                     <span className="dash-grow" />
-                    <button className="btn" onClick={() => cust.show(id)}>
+                    <button className="btn" aria-label={`Show ${CARD_TITLE[id]}`} onClick={() => cust.show(id)}>
                       Show
                     </button>
                   </div>

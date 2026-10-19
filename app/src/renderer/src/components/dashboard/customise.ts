@@ -33,6 +33,12 @@ interface Drag {
 
 const overlapY = (a: CardRect, b: CardRect) => a.top < b.top + b.height && b.top < a.top + a.height
 
+/** Esc with focus here is the field's or the dialog's, not Customise's; so is any Esc while a dialog is open. */
+function escTaken(el: Element | null): boolean {
+  if (el?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], dialog, .palette')) return true
+  return !!document.querySelector('.backdrop, dialog[open]')
+}
+
 /** The click a release makes comes in this same task; a later one is real. */
 function swallowClick() {
   const stop = (e: MouseEvent) => {
@@ -67,7 +73,9 @@ export function useCustomise(key: string) {
   const gridRef = useRef<HTMLDivElement>(null)
   const markerRef = useRef<HTMLDivElement>(null)
   const drag = useRef<Drag | null>(null)
-  const focusAfter = useRef<{ id: CardId; ctl: string | null } | null>(null)
+  const doneRef = useRef<HTMLButtonElement>(null)
+  /** Where focus goes once a change is drawn: a card (and its button), a hidden card's Show, or Done. */
+  const focusAfter = useRef<{ card: CardId; ctl: string | null } | { show: CardId } | 'done' | null>(null)
 
   const commit = useCallback(
     (order: CardId[]) => {
@@ -195,20 +203,28 @@ export function useCustomise(key: string) {
       step: (id: CardId, dir: -1 | 1) => {
         const { layout: l, full: order } = latest.current
         const ctl = (document.activeElement as HTMLElement | null)?.closest(`[data-card="${id}"]`) ? ((document.activeElement as HTMLElement).dataset.ctl ?? null) : null
-        if (commit(moveStep(order, id, dir, (x) => !l.hidden.includes(x)))) focusAfter.current = { id, ctl }
+        if (commit(moveStep(order, id, dir, (x) => !l.hidden.includes(x)))) focusAfter.current = { card: id, ctl }
       },
-      hide: (id: CardId) => setLayout(setHidden(latest.current.layout, id, true)),
+      hide: (id: CardId) => {
+        focusAfter.current = { show: id }
+        setLayout(setHidden(latest.current.layout, id, true))
+      },
     }),
     [cancel, commit, setLayout],
   )
 
-  // Moving the focused card in the DOM drops its focus: give it back, to the same button if it had one.
+  // Moving, hiding or showing a card drops the focus with the element that had it: a moved card
+  // gets it back (on the same button if it had one), a hidden card's place its Show, a shown card
+  // itself; after Reset (its button now disabled), Done.
   useLayoutEffect(() => {
     const f = focusAfter.current
     focusAfter.current = null
-    const card = f ? gridRef.current?.querySelector<HTMLElement>(`[data-card="${f.id}"]`) : null
+    if (!f) return
+    if (f === 'done') return doneRef.current?.focus()
+    if ('show' in f) return gridRef.current?.querySelector<HTMLElement>(`[data-hidden="${f.show}"] button`)?.focus()
+    const card = gridRef.current?.querySelector<HTMLElement>(`[data-card="${f.card}"]`)
     if (!card) return
-    const ctl = f?.ctl ? card.querySelector<HTMLButtonElement>(`[data-ctl="${f.ctl}"]`) : null
+    const ctl = f.ctl ? card.querySelector<HTMLButtonElement>(`[data-ctl="${f.ctl}"]`) : null
     ;(ctl && !ctl.disabled ? ctl : card).focus()
   }, [layout])
 
@@ -219,14 +235,19 @@ export function useCustomise(key: string) {
     },
     [cancel],
   )
-  // Esc cancels a drag first, then leaves Customise mode.
+  // Esc cancels a drag first, then leaves Customise mode, unless it belongs to something else:
+  // a field being typed in, or a dialog or palette that is open.
   useEffect(() => {
     if (!on) return
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
+      if (drag.current) {
+        e.preventDefault()
+        return cancel()
+      }
+      if (escTaken(document.activeElement)) return
       e.preventDefault()
-      if (drag.current) cancel()
-      else setOn(false)
+      setOn(false)
     }
     window.addEventListener('keydown', key, true)
     return () => window.removeEventListener('keydown', key, true)
@@ -254,8 +275,15 @@ export function useCustomise(key: string) {
     shown,
     hidden,
     canReset: !isDefault(layout),
-    reset: () => setLayout({ order: [], hidden: [] }),
-    show: (id: CardId) => setLayout(setHidden(layout, id, false)),
+    reset: () => {
+      focusAfter.current = 'done'
+      setLayout({ order: [], hidden: [] })
+    },
+    show: (id: CardId) => {
+      focusAfter.current = { card: id, ctl: null }
+      setLayout(setHidden(layout, id, false))
+    },
+    doneRef,
     gridRef,
     markerRef,
     onKeyDown,
