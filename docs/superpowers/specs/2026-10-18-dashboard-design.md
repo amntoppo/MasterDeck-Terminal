@@ -63,8 +63,8 @@ Taken in this spec (the recommended ones):
   - The header reads **Dashboard** and "updated just now" (the state's `lastSnapshotAt`), with a
     **Customise** button.
   - Below it, Needs attention runs full width, then a CSS grid of the other five cards:
-    `repeat(auto-fill, minmax(360px, 1fr))`. Timeline spans two columns where there are two or
-    more.
+    two columns (`repeat(2, minmax(0, 1fr))`, no `dense` packing, so the order on screen is the order
+    Customise edits), with Timeline across the full row: Now | Delivery, Timeline, Usage | Health.
   - At ≤ 760 px there is one column, and Needs attention is always first. That width is
     `usePhone()` in the web app, and a container width check in the window.
 - **Each card** has:
@@ -435,7 +435,7 @@ and the row is hidden.
 - **The layout**: `shared/dashboardLayout.ts`.
   - `type CardId = 'now' | 'timeline' | 'delivery' | 'usage' | 'health'`. Needs attention is
     fixed and not in the layout.
-  - `DASH_DEFAULT = ['now', 'timeline', 'delivery', 'usage', 'health']`.
+  - `DASH_DEFAULT = ['now', 'delivery', 'timeline', 'usage', 'health']`.
   - `interface Layout { order: CardId[]; hidden: CardId[] }`. `{ order: [], hidden: [] }` is the
     default, so a later default applies in full.
   - `cleanLayout(raw)` keeps known ids, without repeats.
