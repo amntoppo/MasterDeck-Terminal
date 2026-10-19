@@ -1,5 +1,5 @@
 // DEV ONLY: `npm run dev:web`, then open /?preview (the app on a stub deck), /?preview=noboard (an account with no
-// GitHub board) or /?preview=gate (the sign-in card).
+// GitHub board), /?preview=empty (nothing to show: every Dashboard card's empty state) or /?preview=gate (the sign-in card).
 // main.tsx imports this only under import.meta.env.DEV, so `npm run build:web` leaves it out.
 import type { Root } from 'react-dom/client'
 import { DECK_ACCESS } from '@shared/remoteDeck'
@@ -14,7 +14,8 @@ import { Card } from '../Gate'
 import { layoutFlow, newLoop, type Flow } from '@shared/flow'
 import { BUILTIN_WORKFLOWS } from '@shared/builtinWorkflows'
 import { parsePrInput } from '@shared/watchPr'
-import { fakeScreen, fixtureCosts, fixtureState, SESSIONS } from './fixture'
+import { emptyState, fakeScreen, fixtureCosts, fixtureState, SESSIONS } from './fixture'
+import { fixtureActivity, fixtureJanitor, fixtureProcsAll } from './dashboardFixture'
 import { localZone, normalizeSchedule, schedView, type Schedule, type SchedRun } from '@shared/sched'
 
 type Fn = (...a: never[]) => unknown
@@ -60,8 +61,8 @@ const loopFlow = (): Flow =>
   })
 
 /** `window.deck` with fixture answers: same blocked/local split as the real RemoteDeck, nothing leaves the page. */
-function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
-  const state: AppState = fixtureState(noBoard)
+function previewDeck(noBoard: boolean, twoAccounts = false, empty = false): DeckApi {
+  let state: AppState = fixtureState(noBoard)
   // `?preview=accounts`: two connected accounts, so the account pickers show.
   if (twoAccounts) {
     const acct = (login: string, primary: boolean) => ({ login, name: login, email: `${login}@example.com`, ...(primary ? { primary: true as const } : {}), owner: 'acme', ownerType: 'organization' as const, issueRepo: 'web', repos: ['acme/web'], projects: [] })
@@ -105,6 +106,7 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
     ...state.watches,
     { id: 'review:prs-mine', sessionId: '', description: 'Automate Review · Mine', command: 'is:pr is:open review-requested:@me archived:false sort:updated-desc org:acme', startedAt: ar0 - 5 * 3600_000, events: 9, lastEventAt: ar0 - 2 * 60_000, queued: 0 },
   ]
+  if (empty) state = emptyState(state)
   const stateCbs = new Set<(s: AppState) => void>()
   const pty = new Map<string, Set<(d: string, seq: number) => void>>()
   let seq = 1
@@ -239,9 +241,12 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
     templates: () => [],
     ticketMemory: () => [],
     searchHistory: () => [],
-    janitor: () => [],
+    janitor: () => (empty ? [] : fixtureJanitor()),
+    // The Dashboard's Timeline: two days of events, every type, cut to the range asked.
+    activityList: (since: number, until: number) => (empty ? [] : fixtureActivity().filter((e) => e.at >= since && e.at <= until)),
+    procsAll: () => (empty ? { at: Date.now(), sessions: {}, strays: [] } : fixtureProcsAll()),
     standupCommits: () => [],
-    tokensByDay: () => fixtureCosts().tokens,
+    tokensByDay: () => (empty ? {} : fixtureCosts().tokens),
     // Details → Session → Processes (#115): a dev server and an API with ports, and a test run that just failed.
     procsList: () => {
       const t = Date.now()
@@ -413,7 +418,13 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
     run({ startedAt: t0 - 72 * H, endedAt: t0 - 72 * H, status: 'skipped', trigger: 'missed', costUsd: 0, reason: 'a run was missed while the Mac slept or MasterDeck was closed', sessionName: '' }),
     run({ scheduleId: 'p2', scheduleName: 'Nightly docs', status: 'running', startedAt: t0 - 0.5 * H, endedAt: null, sessionName: 'docs-refresh', bgId: 'bg-4', costUsd: 0.31 }),
     run({ scheduleId: 'p2', scheduleName: 'Nightly docs', status: 'failed', startedAt: t0 - 24.5 * H, endedAt: t0 - 24.5 * H, reason: 'Workspace not trusted', sessionName: 'nightly-docs-1016-0200', costUsd: 0 }),
+    // A failed run in the last day, for the Dashboard's Needs attention.
+    run({ status: 'failed', startedAt: t0 - 5 * H, endedAt: t0 - 4.9 * H, trigger: 'manual', reason: 'claude exited with code 1 before its first turn', sessionName: 'morning-triage-now', costUsd: 0.04 }),
   ]
+  if (empty) {
+    schedules = []
+    schedRuns = []
+  }
   const schedCbs = new Set<() => void>()
   const schedChanged = () => schedCbs.forEach((cb) => cb())
   const local: Record<string, unknown> = {
@@ -445,6 +456,8 @@ function previewDeck(noBoard: boolean, twoAccounts = false): DeckApi {
       return { ok: true, message: 'started' }
     },
     onSchedChanged: (cb: () => void) => (schedCbs.add(cb), () => schedCbs.delete(cb)),
+    // The preview's log never changes.
+    onActivityChanged: () => () => {},
     notesList: async () => sortNotes([...notes.values()].map(noteMeta)),
     notesGet: async (id: string) => notes.get(id) ?? null,
     notesSearch: async (q: string) => [...notes.values()].filter((n) => matches(n, q)).map((n) => n.id),
@@ -533,7 +546,7 @@ export function mountPreview(root: Root, which: string): void {
     )
     return
   }
-  window.deck = previewDeck(which === 'noboard', which === 'accounts')
+  window.deck = previewDeck(which === 'noboard', which === 'accounts', which === 'empty')
   root.render(
     <>
       <App />

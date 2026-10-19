@@ -43,6 +43,23 @@ describe('MeetingStore', () => {
     expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([])
   })
 
+  it('onEnded: once, when the recording ends; a throw breaks nothing', () => {
+    const ended: string[] = []
+    const st = new MeetingStore(dir, () => clock, (m) => {
+      ended.push(`${m.id}:${m.ended}`)
+      throw new Error('boom')
+    })
+    const r = st.create({ title: 'Standup', titleBy: 'user', model: 'base', language: 'auto' })
+    if (!r.ok) throw new Error(r.message)
+    const id = r.meeting.id
+    expect(st.update(id, (x) => ({ ...x, pausedMs: 5 })).ok).toBe(true)
+    expect(ended).toEqual([])
+    const u = st.update(id, (x) => ({ ...x, state: 'transcribing', ended: 2000 }))
+    expect(u.ok && u.meeting.ended).toBe(2000)
+    expect(st.update(id, (x) => ({ ...x, state: 'done', ended: 2500 })).ok).toBe(true)
+    expect(ended).toEqual([`${id}:2000`])
+  })
+
   it('foreign files are skipped and never overwritten or removed', () => {
     const m = make()
     writeFileSync(join(dir, `${FOREIGN}.json`), '{"mine": true}')

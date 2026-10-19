@@ -193,13 +193,15 @@ export function sessionGroups(rows: ProcRow[], root: number, groups: ReadonlySet
 
 /** One process's open files that matter here: its folder, its stdout, its listening sockets. */
 export interface LsofInfo {
+  /** The process name (lsof's `c` field, when asked for): no path, no arguments. */
+  name?: string
   cwd?: string
   /** stdout, when it is a regular file. */
   out?: string
   listens: Listen[]
 }
 
-/** lsof's `-F` output (`p`, `f`, `t`, `n` fields) → per pid. */
+/** lsof's `-F` output (`p`, `c`, `f`, `t`, `n` fields) → per pid. */
 export function parseLsof(text: string): Map<number, LsofInfo> {
   const map = new Map<number, LsofInfo>()
   let cur: LsofInfo | null = null
@@ -215,7 +217,9 @@ export function parseLsof(text: string): Map<number, LsofInfo> {
       fd = ''
       type = ''
     } else if (!cur) continue
-    else if (tag === 'f') {
+    else if (tag === 'c') {
+      if (val) cur.name = val
+    } else if (tag === 'f') {
       fd = val
       type = ''
     } else if (tag === 't') type = val
@@ -349,4 +353,122 @@ export function formatMem(kb: number): string {
   if (kb < 1024) return `${Math.round(kb)} KB`
   const mb = kb / 1024
   return mb < 1024 ? `${Math.round(mb)} MB` : `${(mb / 1024).toFixed(1)} GB`
+}
+
+/**
+ * A process listening on a TCP port in a session's folder or one of its worktrees, not below any
+ * running session (the Dashboard, #183): a dev server a session left behind, or one started by hand.
+ * ponytail: only processes with ports are found; one without a port needs a full table walk per read.
+ */
+export interface StrayProc {
+  pid: number
+  command: string
+  cwd: string | null
+  ports: Listen[]
+  startedAt: number
+  /** The session folder or worktree it sits in (the deepest that holds it). */
+  folderOf: string | null
+  /** Its process name from lsof (no path, no arguments), when lsof gave one. */
+  name?: string
+}
+
+/** Every session's running processes, by Session.key, and the strays (`procs:all`). */
+export interface ProcsAll {
+  at: number
+  sessions: Record<string, SessionProc[]>
+  strays: StrayProc[]
+  /** Why the read is incomplete ("ps failed (exit 1)"): the lists are then not "nothing running". */
+  error?: string
+}
+
+/**
+ * A command line's executable, base name only (`/usr/bin/python3 -m http.server` → `python3`), for
+ * when lsof gave no process name. An app bundle's executable may hold spaces (`/Applications/My
+ * App.app/Contents/MacOS/My App --x` → `My App`); any other path is cut at the first space.
+ */
+export function commandName(command: string): string {
+  const app = /\.app\/Contents\/MacOS\/(.+?)(?:\s+-|$)/.exec(command.trim())
+  if (app) return app[1].trim()
+  const exe = command.trim().split(/\s+/)[0] ?? ''
+  return exe.slice(exe.lastIndexOf('/') + 1)
+}
+
+/** The last segment of a path (`/work/api/` → `api`). */
+const baseName = (p: string): string => {
+  const t = p.length > 1 ? p.replace(/\/+$/, '') : p
+  return t.slice(t.lastIndexOf('/') + 1) || t
+}
+
+/**
+ * `procs:all` as a web tab gets it. A stray was started by anyone, not a session: the tab gets its
+ * process name (lsof's, else the executable's base name; never a path or its arguments), its
+ * folder's base name, and no cwd. Session processes pass as they are (`procs:list` sends them already).
+ */
+export function procsAllForRemote(all: ProcsAll): ProcsAll {
+  return {
+    ...all,
+    strays: all.strays.map((s) => ({
+      ...s,
+      command: s.name || commandName(s.command),
+      cwd: null,
+      folderOf: s.folderOf === null ? null : baseName(s.folderOf),
+    })),
+  }
+}
+
+/** Is `path` the folder or inside it, on whole path segments (`/a/b` holds `/a/b/c`, not `/a/bc`)? */
+export function insideFolder(path: string, folder: string): boolean {
+  const f = folder.length > 1 ? folder.replace(/\/+$/, '') : folder
+  if (!f) return false
+  return path === f || path.startsWith(f === '/' ? '/' : `${f}/`)
+}
+
+/**
+ * The strays among the listening processes in `info` (lsof's answer, by pid): its cwd inside one of
+ * `folders`, neither a session pid nor below one, and not `claimed` (in a session's process group,
+ * listed under that session already). A listener below another stray is folded into the topmost
+ * one (its ports added), so a server with workers shows once.
+ */
+export function findStrays(
+  rows: ProcRow[],
+  info: ReadonlyMap<number, LsofInfo>,
+  folders: readonly string[],
+  sessionPids: readonly number[],
+  now: number,
+  claimed: ReadonlySet<number> = new Set(),
+): StrayProc[] {
+  const byPid = new Map(rows.map((r) => [r.pid, r]))
+  const sessions = new Set(sessionPids)
+  /** The pid's ancestors, nearest first (not the pid itself). */
+  const ancestors = (pid: number): number[] => {
+    const out: number[] = []
+    const seen = new Set<number>([pid])
+    let r = byPid.get(pid)
+    while (r && r.ppid > 0 && !seen.has(r.ppid)) {
+      seen.add(r.ppid)
+      out.push(r.ppid)
+      r = byPid.get(r.ppid)
+    }
+    return out
+  }
+  const deepest = (cwd: string): string | null => {
+    let best: string | null = null
+    for (const f of folders) if (insideFolder(cwd, f) && (best === null || f.length > best.length)) best = f
+    return best
+  }
+  const found = new Map<number, StrayProc>()
+  for (const [pid, i] of [...info].sort((a, b) => a[0] - b[0])) {
+    const row = byPid.get(pid)
+    if (!i.listens.length || !row || !i.cwd || sessions.has(pid) || claimed.has(pid)) continue
+    const folder = deepest(i.cwd)
+    if (folder === null || ancestors(pid).some((a) => sessions.has(a))) continue
+    found.set(pid, { pid, command: row.command, cwd: i.cwd, ports: i.listens, startedAt: now - row.elapsed * 1000, folderOf: folder, ...(i.name ? { name: i.name } : {}) })
+  }
+  const out: StrayProc[] = []
+  for (const s of found.values()) {
+    const top = ancestors(s.pid).filter((a) => found.has(a)).pop()
+    if (top === undefined) out.push(s)
+    else found.get(top)!.ports = [...found.get(top)!.ports, ...s.ports]
+  }
+  return out.map((s) => ({ ...s, ports: uniquePorts(s.ports) })).sort((a, b) => a.startedAt - b.startedAt || a.pid - b.pid)
 }

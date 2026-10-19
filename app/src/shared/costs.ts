@@ -19,6 +19,8 @@ export interface CostEntry {
   cost: number
   /** When the session started (epoch ms), if known. */
   startedAt?: number | null
+  /** The GitHub account the session works as, if known (`Session.account`). */
+  account?: string
 }
 
 /**
@@ -32,6 +34,8 @@ export interface SessionCost {
   key: string
   issue: number | null
   issueRepo?: string | null
+  /** The session's GitHub account, the latest one seen; missing: not known. */
+  account?: string
   /** Bucket (YYYY-MM-DDTHH, or YYYY-MM-DD) → highest cumulative cost seen in it. */
   days: Record<string, number>
 }
@@ -57,11 +61,11 @@ export function recordCosts(book: CostBook, entries: CostEntry[], bucket: string
   for (const e of entries) {
     if (!(e.cost >= 0)) continue
     if (!book[e.sessionId] && dayStartMs !== undefined && (e.startedAt == null || e.startedAt < dayStartMs)) {
-      book[e.sessionId] = { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), days: { [BASELINE]: e.cost } }
+      book[e.sessionId] = { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), ...(e.account ? { account: e.account } : {}), days: { [BASELINE]: e.cost } }
       changed = true
       continue
     }
-    const rec = (book[e.sessionId] ??= { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), days: {} })
+    const rec = (book[e.sessionId] ??= { name: e.name, key: e.key, issue: e.issue, ...(e.issueRepo ? { issueRepo: e.issueRepo } : {}), ...(e.account ? { account: e.account } : {}), days: {} })
     if (rec.name !== e.name || rec.issue !== e.issue || (rec.issueRepo ?? null) !== (e.issueRepo ?? null) || rec.key !== e.key) {
       rec.name = e.name
       rec.key = e.key
@@ -70,6 +74,11 @@ export function recordCosts(book: CostBook, entries: CostEntry[], bucket: string
         if (e.issueRepo) rec.issueRepo = e.issueRepo
         else delete rec.issueRepo
       }
+      changed = true
+    }
+    // An entry without an account keeps the one seen before (the session may have left the list).
+    if (e.account && rec.account !== e.account) {
+      rec.account = e.account
       changed = true
     }
     if ((rec.days[bucket] ?? -1) < e.cost) {
@@ -171,6 +180,11 @@ export function pruneBook(book: CostBook, today: string, keepDays = 120, hourDay
   }
 }
 
+/** A GitHub login: 1 to 39 characters. */
+function validAccount(a: unknown): a is string {
+  return typeof a === 'string' && a.length > 0 && a.length <= 39
+}
+
 /** Keep only well-formed records from a costs file (anything else would crash the math). */
 export function validBook(raw: unknown): CostBook {
   const out: CostBook = {}
@@ -180,7 +194,7 @@ export function validBook(raw: unknown): CostBook {
     if (!rec || typeof rec !== 'object' || !rec.days || typeof rec.days !== 'object') continue
     const days: Record<string, number> = {}
     for (const [d, v] of Object.entries(rec.days)) if (typeof v === 'number' && Number.isFinite(v)) days[d] = v
-    out[id] = { name: typeof rec.name === 'string' ? rec.name : id.slice(0, 8), key: typeof rec.key === 'string' ? rec.key : id, issue: typeof rec.issue === 'number' ? rec.issue : null, ...(typeof rec.issueRepo === 'string' ? { issueRepo: rec.issueRepo } : {}), days }
+    out[id] = { name: typeof rec.name === 'string' ? rec.name : id.slice(0, 8), key: typeof rec.key === 'string' ? rec.key : id, issue: typeof rec.issue === 'number' ? rec.issue : null, ...(typeof rec.issueRepo === 'string' ? { issueRepo: rec.issueRepo } : {}), ...(validAccount(rec.account) ? { account: rec.account } : {}), days }
   }
   return out
 }

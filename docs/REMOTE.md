@@ -295,6 +295,20 @@ The backend only relays opaque frames; the Mac's store is authoritative.
   subscribed, and a note's whole text goes only as the answer of `notesGet` or in the conflict
   answer of `notesSave`. `notesDelete` from a tab skips the Mac's native confirmation (the web app
   asked with `webConfirm`). Details: [ARCHITECTURE § Notes](ARCHITECTURE.md).
+- The Dashboard's reads (#183) are `remote` calls and an `event`, never in the state or the
+  snapshot of §2, so they add nothing to the state's frame budget (#168):
+  - `activityList(since, until)` (`activity:list`): the activity log's events, at most 31 days, at
+    most 1000. A tab gets them through `forRemote`: a meeting's line loses its title and target
+    ("A meeting was recorded (42 min)"), since every meetings channel is blocked for the web. A
+    note's line carries only the note's id and ticket, on the Mac too.
+  - `onActivityChanged` (`activity:changed`, no payload, at most every 2 s on the Mac): the tab
+    lists again from just before its newest event, at most every 15 s.
+  - `procsAll()` (`procs:all`): every session's running processes and the strays in their
+    folders. A stray's `command` reaches a tab as its executable's name only (`commandName`); a
+    session's own processes keep their command line, as `procs:list` does. `openPort` stays
+    `blocked`, so the web app shows ports as text.
+  
+  Details: [ARCHITECTURE § The Dashboard and the activity log](ARCHITECTURE.md).
 - `dropChannels()` on any CloudSync disconnect (approval requests survive and finish after the
   reconnect); `closeAll()` on sign-out/account change.
 

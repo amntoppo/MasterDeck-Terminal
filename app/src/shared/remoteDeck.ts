@@ -112,6 +112,9 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   onMeetingsShowRecord: blocked,
   onNotesChanged: { kind: "event", ch: CH.notesChanged },
   onSchedChanged: { kind: "event", ch: CH.schedChanged },
+  // The Dashboard's Timeline (#183): read-only, and it carries no note text (noteEvent).
+  activityList: invoke(CH.activityList),
+  onActivityChanged: { kind: "event", ch: CH.activityChanged },
   // A notification click on the Mac shows the window's view only.
   onShowSchedules: local,
   // A session's files and diffs, read only, inside its own folder (sessionFileCall), cut to fit the bridge (webFit).
@@ -220,6 +223,7 @@ export const DECK_ACCESS: Record<keyof DeckApi, Access> = {
   openLink: local,
   procsList: invoke(CH.procsList),
   procsOutput: invoke(CH.procsOutput),
+  procsAll: invoke(CH.procsAll),
   // A port is on the Mac: a browser elsewhere cannot open its localhost.
   openPort: blocked,
   openEditor: blocked,
@@ -251,6 +255,7 @@ export const REMOTE_EVENTS: Record<string, string> = {
   onTicketsCreated: CH.ticketsCreated,
   onNotesChanged: CH.notesChanged,
   onSchedChanged: CH.schedChanged,
+  onActivityChanged: CH.activityChanged,
   onBtwEvent: CH.btwEvent,
 };
 

@@ -9,6 +9,7 @@ import { meetingsHere } from '../meetingLinks'
 
 export type PaletteAction =
   | 'refresh'
+  | 'view:dashboard'
   | 'view:terminals'
   | 'view:board'
   | 'view:prs'
@@ -48,6 +49,7 @@ interface Props {
 
 const ACTIONS: [PaletteAction, string, string][] = [
   ['refresh', 'Refresh from GitHub', 'issues, PRs and the board'],
+  ['view:dashboard', 'Go to Dashboard', 'what needs you, what runs, what shipped'],
   ['view:terminals', 'Go to Terminals', 'view'],
   ['view:board', 'Go to Board View', 'view'],
   ['view:prs', 'Go to PRs', 'my PRs, review queue'],

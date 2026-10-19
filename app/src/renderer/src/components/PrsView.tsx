@@ -8,6 +8,7 @@ import { formatRefreshed } from '@shared/format'
 import { activeFilterCount, ageText, DEFAULT_PR_FILTERS, filterPrs, parseSavedPrTabs, prFilterOptions, prsForAccount, reviewLabel, type PrFilters, type TeamPr } from '@shared/teamPrs'
 import type { AppState, Issue, Pr, Session } from '@shared/types'
 import { deck, load, save, useNow } from '../deck'
+import { defaultPrTabs, PR_PRESETS, presetFilters, presetOf } from '../prPresets'
 import { PrIcon } from './BoardView'
 import { PhoneFilters } from './PhoneFilters'
 import { usePhone } from '../web'
@@ -63,22 +64,8 @@ const paneOf = (tab: string, r: ReviewSession) => r.paneId ?? reviewPaneId(tab, 
 
 /** The saved tabs; before any are saved, Mine (my open PRs, selected) and Everyone. */
 function loadTabs(): PrTab[] {
-  const saved = parseSavedPrTabs(load<unknown>(TABS, null))
-  if (saved) return saved
-  return [
-    { id: 'prs-mine', name: 'Mine', filters: presetFilters('Mine') },
-    { id: 'prs-everyone', name: 'Everyone', filters: presetFilters('Everyone') },
-  ]
+  return parseSavedPrTabs(load<unknown>(TABS, null)) ?? defaultPrTabs()
 }
-const PRESETS: { label: string; title: string; f: Partial<PrFilters> }[] = [
-  { label: 'Everyone', title: 'All open PRs in the org', f: { state: 'open', author: '', review: 'any', ci: 'any' } },
-  { label: 'Mine', title: 'Open PRs I created', f: { state: 'open', author: '@me', review: 'any', ci: 'any' } },
-  { label: 'Needs my review', title: 'Open PRs where my review is requested', f: { state: 'open', author: '', review: 'needs-me', ci: 'any' } },
-  { label: 'Failing CI', title: 'Open PRs with failing checks', f: { state: 'open', author: '', review: 'any', ci: 'failing' } },
-  { label: 'Recently merged', title: 'Merged in the last 7 days', f: { state: 'merged', author: '', review: 'any', ci: 'any', updated: 7 } },
-]
-
-const presetFilters = (label: string): PrFilters => ({ ...DEFAULT_PR_FILTERS, ...(PRESETS.find((p) => p.label === label)?.f ?? {}) })
 
 function asPr(p: TeamPr, snapshot: Pr[]): Pr {
   const known = snapshot.find((x) => x.url === p.url)
@@ -275,7 +262,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
   const offers = useMemo(() => state.inbox.open.flatMap((e) => (e.item.detail.type === 'offer' ? [{ ...e.item.detail.offer, itemId: e.item.id }] : [])), [state.inbox.open])
   const active = activeFilterCount(f)
   const phone = usePhone()
-  const preset = PRESETS.find((p) => (Object.keys(DEFAULT_PR_FILTERS) as (keyof PrFilters)[]).every((k) => k === 'sort' || f[k] === { ...DEFAULT_PR_FILTERS, ...p.f }[k]))
+  const preset = presetOf(f)
   const loading = state.teamPrsLoading
 
   // The filter row: inline on a wide screen; on a phone, behind a "Filters (n)" button.
@@ -378,7 +365,7 @@ export function PrsView({ state, onOpenSession, onPr, onStartWith }: Props) {
       <header className="board-head">
         <h2>Pull requests</h2>
         <div className="seg">
-          {PRESETS.map((p) => (
+          {PR_PRESETS.map((p) => (
             <button key={p.label} className={preset === p ? 'on' : ''} title={p.title} onClick={() => setF((cur) => ({ ...DEFAULT_PR_FILTERS, sort: cur.sort, ...p.f }))}>
               {p.label}
             </button>

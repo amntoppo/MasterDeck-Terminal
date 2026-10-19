@@ -11,6 +11,7 @@ import {
   mediaAllowed,
   meetingsAgreed,
   MicLogKeep,
+  type Meeting,
   type MeetingLive,
   type MicLogEntry,
   MEETINGS_GRANTS,
@@ -117,6 +118,8 @@ export interface MeetingsDeps {
   loadService?: () => Promise<ServiceModule>
   /** MASTERDECK_HOME/meetings */
   meetingsDir: string
+  /** A meeting's recording ended (MeetingStore's onEnded): the Dashboard's activity log. */
+  onMeetingEnded?: (m: Meeting) => void
   /** The capture window's page (dev server URL or built file) and its preload. */
   capturePage: () => { url: string } | { file: string }
   capturePreload: string
@@ -288,7 +291,7 @@ export class MeetingsIpc {
       this.d.loadService ??
       (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')), ...(await import('./meetings/matcher')) }))
     const mod = await load()
-    const store = new mod.MeetingStore(this.d.meetingsDir)
+    const store = new mod.MeetingStore(this.d.meetingsDir, undefined, this.d.onMeetingEnded)
     const m = this.d.matching
     if (m?.tidy) {
       try {
@@ -741,7 +744,7 @@ export class MeetingsIpc {
     this.bare ??= this.once(
       (async () => {
         const load = this.d.loadService ?? (async () => ({ ...(await import('./meetings/store')), ...(await import('./meetings/transcriber')) }))
-        return new (await load()).MeetingStore(this.d.meetingsDir)
+        return new (await load()).MeetingStore(this.d.meetingsDir, undefined, this.d.onMeetingEnded)
       })(),
       () => (this.bare = null),
     )

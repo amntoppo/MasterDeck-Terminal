@@ -15,12 +15,12 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 /** A fake `ps` / `lsof`: the table and open files the test sets. */
 function fake() {
-  const t = { ps: '', files: '', socks: '', calls: [] as string[][] }
+  const t = { ps: '', psCode: 0, files: '', filesCode: 1, socks: '', socksCode: 0, socksErr: '', calls: [] as string[][] }
   const run: Runner = async (cmd, args): Promise<RunResult> => {
     t.calls.push([cmd, ...args])
-    if (/(^|\/)ps$/.test(cmd)) return { code: 0, stdout: t.ps, stderr: '' }
-    if (args.includes('-iTCP')) return { code: 0, stdout: t.socks, stderr: '' }
-    return { code: 1, stdout: t.files, stderr: '' }
+    if (/(^|\/)ps$/.test(cmd)) return { code: t.psCode, stdout: t.ps, stderr: t.psCode ? 'ps: /secret/path' : '' }
+    if (args.includes('-iTCP')) return { code: t.socksCode, stdout: t.socks, stderr: t.socksErr }
+    return { code: t.filesCode, stdout: t.files, stderr: '' }
   }
   return { t, run }
 }
@@ -96,6 +96,180 @@ describe('SessionProcs', () => {
     t.ps = [`  10     1    10   01:03  0.0  100 claude`, `  31     1    30   00:04  0.0  100 node dev.js`].join('\n')
     const next = await procs.list({ key: 'k', pid: 10, transcript: null })
     expect(next.ok && next.supported && next.procs.map((p) => [p.pid, p.kind, p.state])).toEqual([[31, 'detached', 'running']])
+  })
+
+  it('listAll: every session’s running processes and the strays, in three spawns', async () => {
+    const { t, run } = fake()
+    const now = 5_000_000
+    const procs = new SessionProcs(run, 'darwin', () => now, '/Users/dev')
+    t.ps = [
+      `  10     1    10   09:00  0.0  100 claude`,
+      `  20    10    20   00:30  0.0  100 ${wrap('npm run dev')}`,
+      `  21    20    20   00:29  1.0  2048 node dev.js`,
+      `  50     1    50   08:00  0.0  100 claude`,
+      `  70     1    70   02:00  0.0  500 python -m http.server`,
+      `  80     1    80   03:00  0.0  500 redis-server`,
+      `  90     1    90   01:00  0.0  500 vite`,
+      `  95     1    95   00:40  0.0  500 /usr/local/bin/node /work/old/server.js`,
+      `  96     1    96   00:50  0.0  500 rails s`,
+    ].join('\n')
+    t.socks = ['p21', 'cnode', 'f4', 'n*:3000', 'p70', 'cpython', 'f3', 'n*:8000', 'p80', 'credis', 'f6', 'n127.0.0.1:6379', 'p90', 'cvite', 'f5', 'n*:5173', 'p95', 'cnode', 'f7', 'n*:4000', 'p96', 'cruby', 'f8', 'n*:3001'].join('\n')
+    t.files = ['p20', 'fcwd', 'tDIR', 'n/work/api', 'p21', 'fcwd', 'tDIR', 'n/work/api', 'p70', 'fcwd', 'tDIR', 'n/work/api/docs', 'p80', 'fcwd', 'tDIR', 'n/', 'p90', 'fcwd', 'tDIR', 'n/work/apix', 'p95', 'fcwd', 'tDIR', 'n/work/old', 'p96', 'fcwd', 'tDIR', 'n/Users/dev/proj'].join('\n')
+    const a = await procs.listAll([
+      { key: 'k1', pid: 10, cwd: '/work/api', worktrees: ['/work/api/.claude/worktrees/w'] },
+      { key: 'k2', pid: 50, cwd: '/work/web', worktrees: [] },
+      { key: 'k3', pid: null, cwd: '/work/old', worktrees: [] },
+      // A session in the home folder, or in /, looks for no strays: most of the machine sits below it.
+      { key: 'k4', pid: null, cwd: '/Users/dev', worktrees: [] },
+      { key: 'k5', pid: null, cwd: '/', worktrees: ['/Users'] },
+    ])
+    expect(t.calls).toHaveLength(3)
+    expect(t.calls.filter((c) => /(^|\/)lsof$/.test(c[0]) && c.includes('-p'))[0]).toContain('20,21,70,80,90,95,96')
+    expect(a.at).toBe(now)
+    expect(Object.keys(a.sessions)).toEqual(['k1', 'k2', 'k3', 'k4', 'k5'])
+    expect(a.error).toBeUndefined()
+    expect(a.sessions.k1.map((p) => [p.pid, p.command, p.cwd, p.state, p.ports.map((x) => x.port)])).toEqual([[20, 'npm run dev', '/work/api', 'running', [3000]]])
+    expect(a.sessions.k2).toEqual([])
+    expect(a.sessions.k3).toEqual([])
+    // 21 is below a session; 80 is elsewhere; 90's folder only shares a prefix with /work/api; 96 is
+    // only below home. 95 sits in a done session's folder.
+    expect(a.strays).toEqual([
+      { pid: 70, command: 'python -m http.server', cwd: '/work/api/docs', ports: [{ host: '*', port: 8000 }], startedAt: now - 120_000, folderOf: '/work/api', name: 'python' },
+      { pid: 95, command: '/usr/local/bin/node /work/old/server.js', cwd: '/work/old', ports: [{ host: '*', port: 4000 }], startedAt: now - 40_000, folderOf: '/work/old', name: 'node' },
+    ])
+  })
+
+  it('listAll leaves list()’s ended processes alone', async () => {
+    const { t, run } = fake()
+    let now = 0
+    const procs = new SessionProcs(run, 'darwin', () => now)
+    t.ps = [`  10     1    10   01:00  0.0  100 claude`, `  30    10    30   00:01  0.0  100 ${wrap('npm run dev &')}`, `  31    30    30   00:01  0.0  100 node dev.js`].join('\n')
+    await procs.list({ key: 'k', pid: 10, transcript: null })
+    now += 1000
+    t.ps = [`  10     1    10   01:01  0.0  100 claude`, `  31     1    30   00:02  0.0  100 node dev.js`].join('\n')
+    // Still listening in the session's folder after launchd adopted it: the session's, not a stray.
+    t.socks = ['p31', 'cnode', 'f4', 'n*:3000'].join('\n')
+    t.files = ['p31', 'fcwd', 'tDIR', 'n/w'].join('\n')
+    // The group 30 was seen by list(): listAll still finds what it left running, and never shows an exited row.
+    const all = await procs.listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])
+    expect(all.sessions.k.map((p) => [p.pid, p.kind, p.state, p.ports.map((x) => x.port)])).toEqual([[31, 'detached', 'running', [3000]]])
+    expect(all.strays).toEqual([])
+    // list()'s last answer is untouched: 30 is still its process (no output file), 31 is not yet.
+    expect(procs.output('k', 30)).toEqual({ ok: false, message: 'Its output goes straight to Claude Code; there is nothing to read here.' })
+    expect(procs.output('k', 31)).toEqual({ ok: false, message: 'That process is not running.' })
+    // list() still has 30 as its last answer: it ended in between, a foreground call, so it just drops off.
+    const next = await procs.list({ key: 'k', pid: 10, transcript: null })
+    expect(next.ok && next.supported && next.procs.map((p) => [p.pid, p.kind, p.state])).toEqual([[31, 'detached', 'running']])
+    expect(procs.output('k', 31).ok).toBe(false)
+  })
+
+  it('listAll says when ps or lsof failed, rather than "nothing running"', async () => {
+    const { t, run } = fake()
+    t.psCode = -2
+    t.socks = ['p70', 'f3', 'n*:8000'].join('\n')
+    const a = await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])
+    expect(a).toEqual({ at: 7, sessions: {}, strays: [], error: 'ps timed out' })
+    expect(t.calls).toHaveLength(2)
+    t.psCode = 1
+    expect((await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])).error).toBe('ps failed (exit 1)')
+
+    t.psCode = 0
+    t.ps = [`  10     1    10   01:00  0.0  100 claude`, `  70     1    70   01:00  0.0  100 python -m http.server`].join('\n')
+    t.files = ''
+    t.filesCode = 2
+    const b = await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])
+    expect(b).toEqual({ at: 7, sessions: { k: [] }, strays: [], error: 'lsof failed (exit 2)' })
+  })
+
+  it('listAll says when the machine-wide lsof failed, and takes "nothing listens" as an answer', async () => {
+    const { t, run } = fake()
+    t.ps = [`  10     1    10   01:00  0.0  100 claude`, `  70     1    70   01:00  0.0  100 python -m http.server`].join('\n')
+    t.socksCode = -2
+    const a = await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])
+    expect(a).toEqual({ at: 7, sessions: { k: [] }, strays: [], error: 'lsof timed out' })
+    t.socksCode = 1
+    t.socksErr = 'lsof: WARNING: something'
+    expect((await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])).error).toBe('lsof failed (exit 1)')
+    // Exit 1 with nothing said: nothing listens on the machine.
+    t.socksErr = ''
+    expect(await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])).toEqual({ at: 7, sessions: { k: [] }, strays: [] })
+    // Some output despite a non-zero exit still counts.
+    t.socksCode = 1
+    t.socksErr = 'lsof: WARNING: something'
+    t.socks = ['p70', 'cpython', 'f3', 'n*:8000'].join('\n')
+    t.files = ['p70', 'fcwd', 'tDIR', 'n/w'].join('\n')
+    const b = await new SessionProcs(run, 'darwin', () => 7).listAll([{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }])
+    expect(b.error).toBeUndefined()
+    expect(b.strays.map((s) => [s.pid, s.name])).toEqual([[70, 'python']])
+  })
+
+  it('shared: callers during a read share it, and an answer under 15 s old is reused', async () => {
+    const { t, run } = fake()
+    let now = 1_000
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    let reads = 0
+    const slow: Runner = async (cmd, args, o) => {
+      if (/(^|\/)ps$/.test(cmd)) {
+        reads++
+        await gate
+      }
+      return run(cmd, args, o)
+    }
+    t.ps = `  10     1    10   01:00  0.0  100 claude`
+    const procs = new SessionProcs(slow, 'darwin', () => now)
+    let asked = 0
+    const sessions = () => {
+      asked++
+      return [{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }]
+    }
+    const a = procs.shared(sessions)
+    const b = procs.shared(sessions)
+    release()
+    const [x, y] = await Promise.all([a, b])
+    expect(x).toBe(y)
+    expect(reads).toBe(1)
+    expect(asked).toBe(1)
+    now += 14_999
+    expect(await procs.shared(sessions)).toBe(x)
+    expect(reads).toBe(1)
+    now += 1
+    const z = await procs.shared(sessions)
+    expect(z).not.toBe(x)
+    expect(z.at).toBe(now)
+    expect(reads).toBe(2)
+  })
+
+  it('shared: a failed read is not kept for the next caller', async () => {
+    let calls = 0
+    const run: Runner = async () => {
+      calls++
+      throw new Error('spawn failed')
+    }
+    const procs = new SessionProcs(run, 'darwin', () => 1)
+    const s = () => [{ key: 'k', pid: 10, cwd: '/w', worktrees: [] }]
+    await expect(procs.shared(s)).rejects.toThrow('spawn failed')
+    await expect(procs.shared(s)).rejects.toThrow('spawn failed')
+    expect(calls).toBe(4)
+  })
+
+  it('listAll matches a folder by its real path (lsof reports /private/tmp for /tmp)', async () => {
+    const { mkdirSync, realpathSync, symlinkSync } = await import('node:fs')
+    mkdirSync(join(dir, 'repo'))
+    symlinkSync(join(dir, 'repo'), join(dir, 'link'))
+    const { t, run } = fake()
+    t.ps = `  70     1    70   01:00  0.0  100 vite`
+    t.socks = ['p70', 'f3', 'n*:5173'].join('\n')
+    t.files = ['p70', 'fcwd', 'tDIR', `n${realpathSync(join(dir, 'repo'))}/web`].join('\n')
+    const a = await new SessionProcs(run, 'darwin', () => 0, '/nowhere').listAll([{ key: 'k', pid: null, cwd: join(dir, 'link'), worktrees: [] }])
+    expect(a.strays.map((s) => [s.pid, s.folderOf])).toEqual([[70, realpathSync(join(dir, 'repo'))]])
+  })
+
+  it('listAll on Windows, and with nothing to look at', async () => {
+    const { t, run } = fake()
+    expect(await new SessionProcs(run, 'win32', () => 7).listAll([{ key: 'k', pid: 1, cwd: '/w', worktrees: [] }])).toEqual({ at: 7, sessions: {}, strays: [] })
+    expect(await new SessionProcs(run, 'darwin', () => 7).listAll([])).toEqual({ at: 7, sessions: {}, strays: [] })
+    expect(t.calls).toEqual([])
   })
 
   it('says the session is not running, and that Windows is not covered', async () => {

@@ -14,7 +14,7 @@ import { webConfirm } from '../webConfirm'
 const CLS_ORDER = ['SAFE', 'PUSHED', 'DIRTY', 'UNPUSHED', 'IN USE']
 
 /** The dirs live sessions work in: a worktree containing any of them is IN USE. */
-function liveDirs(state: AppState): string[] {
+export function liveDirs(state: Pick<AppState, 'sessions' | 'stats' | 'tails' | 'git'>): string[] {
   const dirs: string[] = []
   for (const s of state.sessions) {
     if (s.state === 'done') continue

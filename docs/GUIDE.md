@@ -2,7 +2,7 @@
 
 One window for all your Claude Code sessions, laid out as a command center:
 
-- **The rail** (far left): the views (Terminals, Board, PRs, Tasks), then Costs, Janitor,
+- **The rail** (far left): the **Dashboard** (see [Dashboard](#dashboard)), the views (Terminals, Board, PRs, Tasks), then Costs, Janitor,
   Notes and Workflow, and at the bottom Broadcast, Standup, Skills, Commands (⌘K) and Settings. A badge
   on Terminals counts what needs you; one on PRs counts PRs waiting on you. A blinking amber dot
   above the bottom buttons means a browser, phone or API client is connected right now (see
@@ -65,6 +65,103 @@ part of the app does.
   status line is saved and still runs (its output is shown as before). A settings backup goes to
   `~/.claude/masterdeck/settings.backup.<ts>.json`. Remove it from the master pane's ⋯ menu.
   Set `MASTERDECK_NO_HOOK=1` to skip the automatic install.
+
+## Dashboard
+
+One view, first on the rail (four tiles; **Go to Dashboard** in ⌘K, under **More** on a phone),
+that answers four questions at a glance: what needs me, what is happening now, what happened, and
+how things are going. It shows what MasterDeck already knows; nothing new is polled. The header
+says the date and when the state was last read, and has **Customise**.
+
+Every card has a title, a count in words ("3 running"), a tooltip on each number that says what
+it counts, a **… →** link to the view it sums up, grey blocks while its data loads, and a
+sentence when it has nothing to show. Red means act now, amber soon, green fine. Times are
+relative ("5 min ago") and move on once a minute.
+
+- **Needs attention** (full width, always first): everything that waits on you, in one list.
+  - **What is in it:** the open Needs-you items (snoozed ones are left out), and what MasterDeck
+    sees itself: CI failed, changes requested or unresolved threads on your PRs (any of your
+    GitHub accounts), a review requested from you, a PR of yours ready to merge (approved, checks
+    green, no open threads), a schedule whose last run failed in the last day, a monitor or PR
+    watch that cannot read its source, and an update ready to install. A PR shows once, under its
+    strongest reason, and not at all when a Needs-you item already says the same about it.
+  - **Tiers:** **Now** (red: a session or a PR is blocked until you act: input, menus, questions,
+    errors, CI failed), **Soon** (amber), **Ready** (green: ready to merge) and grey for
+    information. Within a tier, the most important first, then the one waiting longest.
+  - **Actions:** a Needs-you item has its own main action, **Open** and **Reply…**, which opens
+    the real Needs-you card under the row, so menu answers, options, proposals and the rest work
+    exactly as in the Needs-you list. A PR has **Open PR** and **Open session** (when a session
+    owns it); a review request has **Review**, and a ready PR **Merge…**: both open the PR popup
+    (the web app: the PR on GitHub), where **Review with Claude** is. MasterDeck itself does not
+    merge. A failed schedule has **Retry** and **Open**; a broken monitor **Open**; an update
+    **Restart**. Click a row's title to open what it is about.
+  - **Dismiss (×):** a Needs-you item is dismissed as in the Needs-you list (everywhere). Anything
+    else is hidden on this device only, and comes back when it changes (new checks, a new review,
+    another failed run). "*n* dismissed on this device · **Show them again**" brings them back.
+  - Up to 8 rows (5 on a phone), then "and *n* more in Needs you →".
+- **Now:** sessions at work (Working, Background command, Waiting on a monitor or wakeup, Needs
+  you; at most 6, then "*n* more →"), each with how long it has run, its ticket and its last tool.
+  **Processes and ports**: the sessions' running processes that listen on a port, each port a
+  link to open it in the browser, with "Read *n* min ago" and **Refresh**. **Watching**: PR
+  watches, monitors and PRs Automate Review is reviewing. **Next runs**: the next three schedules.
+- **Timeline:** what happened, newest first, grouped by day.
+  - **What it records:** sessions started, finished (a turn ended) and ended; your PRs (and PRs of
+    your sessions) opened, reviewed, merged or closed; board tickets moved between columns;
+    commits pushed; schedule runs; meetings recorded; notes added (only "A note was added", or "…
+    to #42": never the note's title or text); updates installed or offered; Needs-you items
+    answered. Click a row to open its session, PR, ticket, note or meeting.
+  - **From when:** recording starts when the version with the Dashboard is installed; there is no
+    history from before. In the first week an empty range says "The timeline starts recording on
+    *date*."
+  - **Filters:** **Today**, **Yesterday** or **7 days**; kind chips (All, Sessions, PRs, Tickets,
+    Commits, Schedules, Meetings and notes, Needs you); account and repo. They are kept per device.
+    200 rows show, then **Show more**.
+  - **What it cannot see:** a first `git push -u` of a new branch (it has no upstream to be ahead
+    of), and pushes from sessions that are not on screen. A `git reset` to the upstream reads as a
+    push. A session's finished turns are merged into one line per 15 minutes.
+  - Kept on this Mac for 14 days (5000 events at most).
+- **Delivery:** the sprint picked on the Board: tickets per board column, with the board's own
+  column names, and a burndown (tickets left against the ideal line). A board with no sprint field
+  shows the counts only; an account with no GitHub board says so. Below, your PRs: open, waiting
+  on your review, merged in the last 7 days and ready to merge (each opens Pull requests on that tab), and
+  by stage (Draft, In review, Changes requested, Approved).
+- **Usage and cost:** today and this week (Monday to today): cost and tokens; per account with two
+  or more accounts (cost from before this version, or with no account, is **Unknown account**);
+  the last 7 days' cost as a line; the top 3 sessions this week. Warnings: a session that stopped
+  on a rate limit or API error in the last day (**Open session**), GitHub paused, tickets over the
+  budget per ticket (**Costs**). Claude plan limits are not shown (MasterDeck has no source for
+  them).
+- **Health:** one row each for Remote, GitHub, Claude, Hooks and status line (**Fix**), Errors,
+  Stray processes, Worktrees and MasterDeck. All fine shows **All good**, the rows under
+  **Details**.
+  - **Stray processes:** a process listening on a port inside a session's folder or worktree that
+    no running session started (a dev server a finished session left, or one you started by hand).
+    **Show** lists each with its port and folder. Processes without a port are not seen, and a
+    session started in your home folder finds none.
+  - **Worktrees:** not checked until you press **Check worktrees**; then "*n* can be removed"
+    leads to Janitor.
+  - **MasterDeck:** the version, or an update to install with **Restart to update**.
+
+Processes and worktrees are read when the Dashboard opens (at most once a minute) and on their
+buttons, never on a timer.
+
+**Customise** moves and hides the cards below Needs attention (it stays first). Drag a card by its
+handle, or focus it and press ⌥ and an arrow (Alt on Windows) to move it one place; the eye hides
+it, and a hidden card shows as "*Card* is hidden · **Show**" at the end. **Reset** puts the default
+back; **Done** or Esc ends it. Rows do not open anything while Customise is on. On a phone the
+handle is gone: ← and → move a card. The layout is kept per device (the Mac and each browser have
+their own).
+
+**Settings → General → Open MasterDeck on**: **Last view** (the default) or **Dashboard**. On the
+Mac it is a setting; in the web app each browser keeps its own and never changes the Mac's.
+
+**In the web app and on a phone** the Dashboard is the same, except: no MasterDeck update row and
+no **Restart**; ports are text, not links (a `localhost` there is not the Mac's); a meeting's
+Timeline line has no title ("A meeting was recorded (42 min)") and opens nothing; a stray process
+shows only its program's name. On a phone (or a window 760 px wide or less) there is one column,
+Needs attention shows 5 rows, each card is trimmed (Now: the sessions and one summary line;
+Timeline: the range and **Filter · All**, which opens the kinds, account and repo in a sheet;
+Delivery: the bar and two numbers; Usage: the totals and accounts; Health: the summary).
 
 ## Starting and linking sessions
 
@@ -1239,6 +1336,8 @@ Stored in `~/.claude/masterdeck/settings.json`.
   can be light while the Mac stays dark. In the light theme, terminal text is darkened
   automatically where a program picked colours for a dark background. If Claude Code's own colours
   still look wrong, run `/theme` in the session and pick a light theme there.
+- **Open MasterDeck on** (General): **Last view** (the default) or **Dashboard**. In the web app
+  each browser keeps its own choice.
 
 - **Notifications:** a table of what MasterDeck tells you about (rows) and where (columns), with a
   checkbox per cell. The kinds: Session finished, Session needs input (a permission prompt, a
@@ -1643,7 +1742,7 @@ encrypted (the MasterDeck service only relays sealed messages it can't read). Ne
   the Mac. The Mac shows "Allow <browser> to control this Mac?" with **three words**; allow only if
   the browser shows the same three words. **Deny** is the default; Esc does nothing. A request
   expires after 5 minutes. A private window can't be approved (it can't keep its key).
-- **What works:** every view (Terminals with live terminals you can type in, Board, PRs, Tasks,
+- **What works:** every view (Dashboard, Terminals with live terminals you can type in, Board, PRs, Tasks,
   Costs, Janitor, Notes, Workflow, Settings, Skills, Standup, Broadcast, History). Confirmations show in the
   page instead of on the Mac. Not on the web: signing in or out of the Mac's account, approving
   browsers, connecting GitHub accounts, the folder picker (a repo picker instead), opening editors,
@@ -1674,7 +1773,7 @@ Open app.masterdeck.dev in the phone's browser (iPhone Safari, Android Chrome); 
 
 - **Tab bar** at the bottom: **Sessions** (Needs you and the session list; badge = what needs
   you), **Tasks**, **Board**, **PRs** (badge = PRs waiting on you), **Master** (when master-agent is
-  on) and **More** (Costs, Janitor, Notes, Workflow, Settings, Broadcast, Standup, Skills, Commands).
+  on) and **More** (Dashboard, Costs, Janitor, Notes, Workflow, Settings, Broadcast, Standup, Skills, Commands).
 - **A session:** tap it in Sessions. The terminal fills the screen: **‹ Sessions** goes back,
   **Panel** opens Details / Tools / Summary as a sheet (› closes it). One terminal at a time (no
   split).

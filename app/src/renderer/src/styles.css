@@ -2001,3 +2001,177 @@ details.sd-more > summary:hover { color: var(--text); }
 .session-menu-sub { padding-left: 8px; border-left: 2px solid var(--line); margin: 2px 0 2px 10px; }
 .session-menu-sub .check { display: inline-block; width: 14px; color: var(--accent); }
 .sched-trust { margin: 6px 0; }
+
+/* Dashboard (#183). Tokens only; no animation or transition (#160). */
+/* Needs attention runs full width above a grid of the other cards; the grid's container width decides its columns. */
+.panel .dash-body { container-type: inline-size; padding: 16px 20px 32px; }
+.dash-wrap { display: flex; flex-direction: column; gap: 16px; }
+/* Two columns (one at 760 px or less, below), filled in DOM order, never `dense`: the screen's order is
+   the order Customise's ← → and Tab follow. Timeline takes a whole row. */
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.dash-grid > .dash-timeline { grid-column: 1 / -1; }
+.dash-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; }
+.dash-ch { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
+.dash-ct { font-size: 13px; font-weight: 600; margin: 0; white-space: nowrap; }
+.dash-cnt { font-size: 12px; color: var(--muted); font-weight: 500; border-bottom: 1px dotted var(--line-3); cursor: help; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dash-grow { flex: 1; }
+.dash-cb { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dash-more { font: inherit; font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
+.dash-more:hover { text-decoration: underline; }
+.dash-more:disabled { color: var(--faint); cursor: default; text-decoration: none; }
+.dash-empty { color: var(--muted); font-size: 12.5px; padding: 18px 4px; text-align: center; }
+.dash-sub { color: var(--muted); font-size: 12px; }
+.dash-muted { color: var(--muted); }
+.dash-err { color: var(--red); font-size: 11.5px; }
+.dash-mono { font-family: var(--mono); }
+.dash-ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.dash-sec { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 600; margin-top: 4px; }
+.dash-list { display: flex; flex-direction: column; min-width: 0; }
+.dash-sk-list { display: flex; flex-direction: column; gap: 12px; padding: 6px 0; }
+.dash-sk { background: var(--bg-4); border-radius: 6px; height: 12px; }
+.dash-allgood { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; border-radius: 8px; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); font-weight: 600; font-size: 12.5px; }
+.dash-amber { color: var(--amber); }
+.dash-green { color: var(--green); }
+
+/* Tier pills: red acts now, amber soon, green is fine, grey informs. */
+.dash-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; text-align: center; }
+.dash-p-now { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.dash-p-soon { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.dash-p-ready { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.dash-p-info { color: var(--muted); background: var(--bg-3); }
+
+/* Needs attention: a stronger frame and a header band. */
+.dash-attn { border-color: var(--line-2); }
+.dash-attn > .dash-ch { background: var(--bg-3); border-radius: 12px 12px 0 0; padding: 14px 16px 12px; }
+.dash-attn > .dash-cb { padding-top: 4px; }
+.dash-arow-wrap { border-bottom: 1px solid var(--line); }
+.dash-arow-wrap:last-child { border-bottom: 0; }
+.dash-arow { display: grid; grid-template-columns: 62px minmax(0, 1fr) 104px auto 28px; align-items: center; gap: 4px 12px; padding: 9px 6px; }
+.dash-arow-main { display: flex; flex-direction: column; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.dash-arow-main:hover .dash-at { text-decoration: underline; }
+.dash-at { font-size: 13px; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-aw { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-age { font-size: 12px; color: var(--faint); text-align: right; white-space: nowrap; }
+.dash-acts { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.dash-acts .btn { white-space: nowrap; }
+.dash-x { width: 28px; height: 28px; border: 0; border-radius: 7px; background: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.dash-x:hover { color: var(--text); background: var(--bg-3); }
+.dash-reply { padding: 0 6px 10px 86px; }
+.dash-reply .card { margin: 0; }
+.dash-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+
+/* Rows that navigate are buttons drawn as rows. */
+.dash-srow, .dash-rowbtn, .dash-ev { font: inherit; color: inherit; background: none; border: 0; text-align: left; cursor: pointer; width: 100%; }
+.dash-srow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.dash-srow:last-of-type { border-bottom: 0; }
+.dash-srow:hover .dash-sname > .dash-ell, .dash-rowbtn:hover > .dash-ell, .dash-ev:hover .dash-evx { text-decoration: underline; }
+.dash-sname { font-weight: 600; display: flex; gap: 2px; align-items: center; min-width: 0; }
+.dash-chip { font-size: 11px; display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); white-space: nowrap; }
+.dash-sline { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-sline.dash-mono { font-size: 11.5px; }
+.dash-dot { width: 7px; height: 7px; border-radius: 99px; display: inline-block; flex: none; }
+.dash-d-work { background: var(--accent); }
+.dash-d-busy { background: var(--purple); }
+.dash-d-wait { background: var(--faint); }
+.dash-d-ok { background: var(--green); }
+.dash-d-warn { background: var(--amber); }
+.dash-d-bad { background: var(--red); }
+.dash-mini { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 0; color: var(--text-2); min-width: 0; }
+.dash-mini.dash-muted { color: var(--muted); }
+.dash-r { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.dash-link { font: inherit; font-size: 12px; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; white-space: nowrap; }
+.dash-link:hover { text-decoration: underline; }
+.dash-link-quiet { font: inherit; font-size: 12px; background: none; border: 0; padding: 0; cursor: pointer; }
+.dash-link-quiet:hover { color: var(--text); text-decoration: underline; }
+.dash-warn-text { color: var(--amber); }
+
+/* Timeline */
+.dash-tfil { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dash-fchip { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line-2); background: transparent; color: var(--text-3); cursor: pointer; }
+.dash-fchip:hover { color: var(--text); }
+.dash-fchip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.dash-seg { flex: none; }
+.dash-seg button { flex: none; }
+.dash-sel { font: inherit; font-size: 12px; height: 26px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--bg-3); color: var(--text-2); padding: 0 8px; max-width: 180px; }
+.dash-feed { max-height: 360px; overflow: auto; display: flex; flex-direction: column; }
+.dash-day { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; padding: 8px 0 4px; position: sticky; top: 0; background: var(--bg-2); z-index: 1; }
+.dash-ev { display: grid; grid-template-columns: 44px 46px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); }
+div.dash-ev { cursor: default; }
+.dash-evt { font-size: 12px; color: var(--faint); }
+.dash-tag { font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; text-align: center; letter-spacing: .03em; }
+.dash-k-ses { color: var(--accent); background: var(--accent-soft); }
+.dash-k-pr { color: var(--purple); background: var(--bg-3); }
+.dash-k-tkt { color: var(--teal); background: var(--bg-3); }
+.dash-k-git { color: var(--orange); background: var(--bg-3); }
+.dash-k-run { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.dash-k-note { color: var(--text-3); background: var(--bg-3); }
+.dash-k-you { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.dash-evbody { display: flex; flex-direction: column; min-width: 0; }
+.dash-evx { font-size: 12.5px; color: var(--text-2); }
+.dash-evm { font-size: 11.5px; color: var(--muted); }
+.dash-showmore { align-self: center; padding: 8px 0; }
+
+/* Delivery and usage */
+.dash-bar { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--bg-4); }
+.dash-legend { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; align-items: center; }
+.dash-legend .dash-dot { vertical-align: 1px; }
+.dash-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.dash-kpis-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dash-kpi { display: flex; flex-direction: column; min-width: 0; background: var(--bg-3); border: 0; border-radius: 9px; padding: 8px 10px; text-align: left; font: inherit; color: inherit; }
+button.dash-kpi { cursor: pointer; }
+button.dash-kpi:hover { background: var(--bg-4); }
+.dash-kv { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.dash-kl { font-size: 11.5px; color: var(--muted); line-height: 1.3; }
+.dash-spark-box { position: relative; height: 46px; }
+.dash-spark { width: 100%; height: 46px; display: block; }
+.dash-spark-dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 99px; background: var(--accent); }
+.dash-utable { display: flex; flex-direction: column; }
+.dash-urow { display: grid; grid-template-columns: minmax(0, 1fr) 70px 70px 60px; gap: 8px; font-size: 12.5px; padding: 5px 0; border-bottom: 1px solid var(--line); align-items: center; }
+.dash-urow .acct-badge { margin-left: 0; }
+.dash-uhead { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+.dash-num { text-align: right; font-variant-numeric: tabular-nums; }
+.dash-warn { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--text-2); }
+.dash-warn .dash-dot { margin-top: 5px; }
+
+/* Health */
+.dash-hrow { display: flex; gap: 10px; align-items: center; padding: 7px 0; font-size: 12.5px; min-width: 0; }
+.dash-hrow-wrap { border-bottom: 1px solid var(--line); }
+.dash-hrow-wrap:last-child { border-bottom: 0; }
+.dash-hrow > span:nth-child(2) { white-space: nowrap; }
+.dash-hdt { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-hrow .btn { flex: none; white-space: nowrap; }
+.dash-strays { padding: 0 0 8px 17px; }
+.dash-details > summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
+.dash-more.dash-r { color: var(--accent); }
+.dash-hrow { min-height: 30px; }
+
+/* Customise: a dashed frame per card, a handle, ← → and an eye; the dragged card follows the pointer. */
+.dash-grid { position: relative; }
+.dash-custbtn { display: inline-flex; align-items: center; gap: 6px; }
+.dash-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-cust { outline: 1px dashed var(--line-3); outline-offset: 3px; }
+.dash-cust:focus-visible { outline: 2px solid var(--accent); }
+.dash-handle { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -4px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: grab; touch-action: none; }
+.dash-handle:hover { color: var(--text); background: var(--bg-3); }
+.dash-cust-tools { display: flex; gap: 2px; }
+.dash-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.dash-icon:hover { color: var(--text); background: var(--bg-3); }
+.dash-icon:disabled { opacity: .35; cursor: default; background: none; }
+.dash-lift { position: relative; z-index: 10; box-shadow: 0 10px 28px var(--shadow); cursor: grabbing; }
+.dash-lift .dash-handle { cursor: grabbing; }
+.dash-marker { display: none; position: absolute; z-index: 9; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.dash-hidden-ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--muted); font-size: 12.5px; }
+.dash-filterbtn.active { border-color: var(--accent); background: var(--accent-soft); }
+/* Two columns: Now scrolls inside past 380 px, so a long list does not leave a tall hole beside the next card. */
+@container (min-width: 761px) { .dash-grid > .dash-now > .dash-cb { max-height: 380px; overflow-y: auto; } }
+
+/* One column at a phone's width or a narrow window (after the rules it overrides). */
+@container (max-width: 760px) {
+  .dash-grid { grid-template-columns: minmax(0, 1fr); }
+  .dash-arow { grid-template-columns: 52px minmax(0, 1fr) 28px; }
+  .dash-arow .dash-age { display: none; }
+  .dash-arow .dash-acts { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; }
+  .dash-reply { padding-left: 6px; }
+  .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

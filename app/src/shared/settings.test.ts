@@ -59,6 +59,14 @@ describe('theme', () => {
   })
 })
 
+describe('Open on (#183)', () => {
+  it('is the last view or the Dashboard, else the last view', () => {
+    expect(normalizeSettings({}).startView).toBe('last')
+    expect(normalizeSettings({ startView: 'dashboard' }).startView).toBe('dashboard')
+    for (const bad of ['board', 1, null]) expect(normalizeSettings({ startView: bad }).startView).toBe('last')
+  })
+})
+
 describe('rail order (#170)', () => {
   it('a settings file from before it reads as the default (empty)', () => {
     expect(normalizeSettings({ dockBadge: false }).railOrder).toEqual([])

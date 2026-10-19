@@ -11,6 +11,8 @@ import { dropBefore, isDefaultOrder, isRailMark, moveStep, moveTo, RAIL_DEFAULT,
 
 /** Stroke icons for the rail (24px grid). */
 const ICONS: Record<string, string> = {
+  dashboard:
+    'M4.5 3h5a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5zM14.5 3h5a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-3a1.5 1.5 0 0 1 1.5-1.5zM14.5 11h5a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5zM4.5 15h5a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-3a1.5 1.5 0 0 1 1.5-1.5z',
   terminals: 'M4 17l6-5-6-5M12 19h8',
   board: 'M3 5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM10 5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1zM17 5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1z',
   prs: 'M6 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM18 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6 8v8M18 16V9a3 3 0 0 0-3-3h-4',
@@ -123,6 +125,7 @@ function RemoteIndicator({ remote, onRemote }: { remote: Presence[]; onRemote: (
 }
 
 const VIEWS: [View, string, string][] = [
+  ['dashboard', 'Dashboard', ''],
   ['terminals', 'Terminals', ''],
   ['board', 'Board', ''],
   ['prs', 'Pull requests', ''],
@@ -426,7 +429,8 @@ export function PhoneBar({ view, screen, onView, onSessions, onMaster, onAction,
       <span className="pb-l">{label}</span>
     </button>
   )
-  const tools = [...TOOLS, ['settings', 'Settings'] as [View | 'notes', string]].filter(([v]) => toolOk(v))
+  // The Dashboard leads More; the fixed tabs stay as they are.
+  const tools = [['dashboard', 'Dashboard'] as [View | 'notes', string], ...TOOLS, ['settings', 'Settings'] as [View | 'notes', string]].filter(([v]) => toolOk(v))
   const moreOn = notesOpen || (main && tools.some(([v]) => v === view))
   return (
     <nav className="rail phone-bar" aria-label="Views">

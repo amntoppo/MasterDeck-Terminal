@@ -1093,6 +1093,30 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
   shows on the card only, and the user tells Claude. An answer file the session could read would let
   it react by itself.
 
+## Dashboard (#183): open points (2026-10-18)
+
+- No merge action: **Merge…** on a ready PR opens the PR popup (the web app: GitHub). Adding one
+  means a GitHub write from MasterDeck, with its own confirmation.
+- No Claude plan or rate-limit usage in Usage and cost: there is no source for it. Only what
+  MasterDeck sees (a turn that ended on a rate limit, GitHub paused, tickets over budget).
+- #176's parallel reviews: add their rows to Now → Watching when it lands.
+- A live process list (Now, Health's strays) waits for #160's shared scheduler; until then
+  `procs:all` is read on open, on Refresh and when the sessions at work change, at most once a minute.
+- Strays without a port are not seen (`findStrays` starts from the listening sockets); finding
+  them means a full process table walk per read. A session started in `~` finds no strays at all
+  (`strayFolders`).
+- The layout, dismissals and Timeline filters are per device (localStorage); nothing syncs them
+  between the Mac and browsers.
+- The activity log has no backfill: history starts when this version first runs. The "starts
+  recording on" date is when this device first showed the Dashboard (`md.dashboard.since`); asking
+  main for its first event would be exact.
+- A first `git push -u` of a new branch is not recorded (no upstream, so `ahead` is 0), nor pushes
+  from sessions whose git is not read (not on screen); a `git reset` to the upstream reads as a push.
+- Customise's drop targets are the other cards' boxes measured when the drag starts (a scroll
+  during the drag is followed, a layout change during it is not).
+- **Review** on a review request opens the PR popup (where **Review with Claude** is) rather than
+  starting Review with Claude directly.
+
 ## CI/CD (#178): open points (2026-10-18)
 
 - **P1 · Branch protection on `main`** (the owner, once, after the merge): OPERATIONS § Protecting
@@ -1116,6 +1140,17 @@ ARCHITECTURE "Meetings: …" (MuteWatch, md-mute).
 
 ## Recently done
 
+- **Dashboard (#183)**: a view first on the rail with Needs attention (tiers, Reply… with the real
+  Needs-you card, dismiss per device), Now (sessions at work, ports, watches, next runs), a
+  Timeline from a new activity log (`activity.jsonl`, `activity:list` / `activity:changed`),
+  Delivery, Usage and cost per account (`CostEntry.account`) and Health (strays from the new
+  `procs:all`, worktrees on demand); Customise (drag, ⌥ arrows, hide, Reset, per device);
+  Settings → General → **Open MasterDeck on**; the web app and the phone. Branch
+  `worktree-MasterDeck-Terminal-183-dashboard`, main commits 1a0a5f3 / ab6e860 (the log), 3b4d497
+  (`procs:all`), 7c78d4e (cost accounts), 907a66c (layout), bed6ede (view, Open on), 654a553
+  (recording), d3c5239 (card logic), bc003ba (cards), 0dd971d (Customise), d8ae2bc (phone and
+  web), 672fa2a (final review fixes). Spec and plan:
+  `docs/superpowers/{specs,plans}/2026-10-18-dashboard*`.
 - **CI/CD for a fast cycle (#178)**: PR CI is checks only (ubuntu, parallel, one required job
   **CI**, older runs cancelled, docs-only PRs skip), installers built once per release by
   `build.yml` and on PRs only for packaging changes (`package.yml`, the `build` label), whisper-cli

@@ -158,3 +158,23 @@ html.phone .repo-picker .wt-list { max-height: calc(var(--vvh, 100dvh) - 240px) 
 .app.phone .sched-tbl .sched-actions .btn:first-child { margin-left: 0; }
 .app.phone .sched-what { max-width: none; }
 .app.phone .sched-runs th:nth-child(3), .app.phone .sched-runs td:nth-child(3) { display: none; }
+
+/* Dashboard (#183) on a phone. */
+/* One column and trimmed cards come from the view (its container query and `compact`); here the gutter and targets of at least 40 px. */
+/* Customise moves cards with ← → on a phone: the drag handle is left out. */
+.app.phone.view-dashboard .dash-body { padding: 12px 12px 24px; }
+.app.phone.view-dashboard .dash-wrap { gap: 12px; }
+.app.phone.view-dashboard .dash-grid { gap: 12px; }
+.app.phone.view-dashboard .board-head .dash-hint { flex-basis: 100%; order: 10; white-space: normal; }
+.app.phone.view-dashboard .dash-view .btn { min-height: 40px; }
+.app.phone.view-dashboard .dash-more { display: inline-flex; align-items: center; min-height: 40px; }
+.app.phone.view-dashboard .dash-ch { padding-top: 4px; padding-bottom: 4px; min-height: 48px; }
+.app.phone.view-dashboard .dash-x, .app.phone.view-dashboard .dash-icon { width: 40px; height: 40px; }
+.app.phone.view-dashboard .dash-handle { display: none; }
+.app.phone.view-dashboard .dash-arow-main, .app.phone.view-dashboard .dash-srow, .app.phone.view-dashboard .dash-ev,
+.app.phone.view-dashboard .dash-rowbtn, .app.phone.view-dashboard .dash-kpi { min-height: 40px; }
+.app.phone.view-dashboard .dash-seg button { min-height: 40px; padding: 0 12px; }
+.app.phone.view-dashboard .dash-link, .app.phone.view-dashboard .dash-link-quiet { min-height: 40px; display: inline-flex; align-items: center; }
+html.phone .dash-tl-sheet .dash-fchip { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+html.phone .dash-tl-sheet .dash-sel { width: 100%; max-width: none; min-height: 40px; }
+html.phone .dash-tl-sheet .btn, html.phone .dash-tl-sheet .icon-btn { min-height: 40px; min-width: 40px; }

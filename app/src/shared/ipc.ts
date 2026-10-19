@@ -27,6 +27,7 @@ import type { SetupWindowRequest } from "./setupClaude";
 import type { Note, NoteChange, NoteInput, NoteMeta, SaveResult } from "./notes";
 import type { BtwAskResult, BtwEntry, BtwEvent } from "./btw";
 import type { SchedInput, SchedList } from "./sched";
+import type { ActivityEvent } from "./activityLog";
 import type { ChangeList, DiffRead, FileList, FileRead } from "./sessionFiles";
 import type { DiffBase } from "./sessionTabs";
 import type { HookEntry } from "./workflow";
@@ -85,7 +86,7 @@ export interface WorkflowStatus extends FlowProgress {
   from: string | null;
 }
 import type { SessionSummary } from "./summary";
-import type { ProcsAnswer } from "./sessionProcs";
+import type { ProcsAll, ProcsAnswer } from "./sessionProcs";
 
 export type SetupTool = "claude" | "gh" | "python" | "git" | "jq";
 
@@ -145,6 +146,7 @@ export const CH = {
   openEditor: "app:openEditor",
   procsList: "procs:list",
   procsOutput: "procs:output",
+  procsAll: "procs:all",
   openPort: "procs:openPort",
   copy: "app:copy",
   stopSession: "session:stop",
@@ -255,6 +257,8 @@ export const CH = {
   schedEnable: "sched:enable",
   schedRunNow: "sched:runNow",
   schedChanged: "sched:changed",
+  activityList: "activity:list",
+  activityChanged: "activity:changed",
   showSchedules: "app:showSchedules",
   meetingsSetup: "meetings:setup",
   meetingsConsent: "meetings:consent",
@@ -529,6 +533,10 @@ export interface DeckApi {
   schedRunNow(id: string): Promise<{ ok: boolean; message: string }>;
   /** A schedule or run changed: list again. */
   onSchedChanged(cb: () => void): () => void;
+  /** The Dashboard's activity log (#183): events with since ≤ at ≤ until, newest first; [] for a bad or over-31-day range. */
+  activityList(since: number, until: number): Promise<ActivityEvent[]>;
+  /** The activity log changed (at most every 2 s): list again. */
+  onActivityChanged(cb: () => void): () => void;
   /** A schedule's notification without a session was clicked: show Schedules. */
   onShowSchedules(cb: () => void): () => void;
   /**
@@ -894,6 +902,8 @@ export interface DeckApi {
   procsList(key: string): Promise<ProcsAnswer>;
   /** The last few KB one of them wrote, when its output goes to a file (a background command). */
   procsOutput(key: string, pid: number): Promise<{ ok: true; text: string } | { ok: false; message: string }>;
+  /** Every session's running processes, and the strays listening in their folders (the Dashboard). */
+  procsAll(): Promise<ProcsAll>;
   /** Open a local server in the browser: `http://localhost:<port>` (or an IP literal); anything else is refused. */
   openPort(url: string): void;
   openEditor(dir: string): Promise<CliResult>;

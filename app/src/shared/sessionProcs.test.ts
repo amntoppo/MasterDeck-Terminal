@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanOutput,
+  commandName,
   descendants,
+  findStrays,
+  insideFolder,
   transcriptTasks,
   formatUptime,
   isClaudeShell,
@@ -12,6 +15,7 @@ import {
   parsePs,
   portLabel,
   portUrl,
+  procsAllForRemote,
   sessionGroups,
   shellCommand,
   taskIdOf,
@@ -129,6 +133,97 @@ describe('transcriptTasks', () => {
       ['b1', 0],
       ['b2', 2],
     ])
+  })
+})
+
+describe('findStrays', () => {
+  // pid ppid pgid etime %cpu rss command
+  const rows = parsePs(
+    [
+      `  100     1   100   10:00  0.0  1000 claude`,
+      `  110   100   110   05:00  0.0  1000 node session-child.js`,
+      `  200     1   200   02:00  0.0  1000 node left-behind.js`,
+      `  201   200   200   01:59  0.0  1000 node worker.js`,
+      `  300     1   300   03:00  0.0  1000 python -m http.server`,
+      `  400     1   400   04:00  0.0  1000 redis-server`,
+      `  500     1   500   01:00  0.0  1000 vite`,
+    ].join('\n'),
+  )
+  const info = new Map([
+    [100, { cwd: '/work/api', listens: [{ host: '127.0.0.1', port: 9999 }] }],
+    [110, { cwd: '/work/api', listens: [{ host: '127.0.0.1', port: 3000 }] }],
+    [200, { cwd: '/work/api/web', listens: [{ host: '*', port: 8080 }] }],
+    [201, { cwd: '/work/api/web', listens: [{ host: '*', port: 8081 }, { host: '[::1]', port: 8080 }] }],
+    [300, { cwd: '/work/api-old', listens: [{ host: '*', port: 8000 }] }],
+    [400, { cwd: '/', listens: [{ host: '127.0.0.1', port: 6379 }] }],
+    [500, { cwd: '/work/api/.claude/worktrees/x', listens: [{ host: '*', port: 5173 }] }],
+  ])
+  const folders = ['/work/api/', '/work/api/.claude/worktrees/x']
+
+  it('finds listeners in a session folder or worktree, not below a session, on whole path segments', () => {
+    const s = findStrays(rows, info, folders, [100], 1_000_000)
+    expect(s).toEqual([
+      // Its worker's ports fold into it.
+      { pid: 200, command: 'node left-behind.js', cwd: '/work/api/web', ports: [{ host: '*', port: 8080 }, { host: '*', port: 8081 }], startedAt: 1_000_000 - 120_000, folderOf: '/work/api/' },
+      { pid: 500, command: 'vite', cwd: '/work/api/.claude/worktrees/x', ports: [{ host: '*', port: 5173 }], startedAt: 1_000_000 - 60_000, folderOf: '/work/api/.claude/worktrees/x' },
+    ])
+  })
+  it('counts a listener below a session once that session is gone', () => {
+    const s = findStrays(rows, info, folders, [], 0)
+    expect(s.map((x) => [x.pid, x.ports.map((p) => p.port)])).toEqual([
+      [100, [3000, 9999]],
+      [200, [8080, 8081]],
+      [500, [5173]],
+    ])
+  })
+  it('matches folders on whole segments', () => {
+    expect(insideFolder('/a/b', '/a/b')).toBe(true)
+    expect(insideFolder('/a/b/c', '/a/b')).toBe(true)
+    expect(insideFolder('/a/b/c', '/a/b/')).toBe(true)
+    expect(insideFolder('/a/bc', '/a/b')).toBe(false)
+    expect(insideFolder('/a', '/a/b')).toBe(false)
+    expect(insideFolder('/a', '')).toBe(false)
+  })
+  it('leaves out a listener a session already claims (a detached leftover in its group)', () => {
+    expect(findStrays(rows, info, folders, [100], 0, new Set([500])).map((s) => s.pid)).toEqual([200])
+  })
+  it('gives a command line’s executable name', () => {
+    expect(commandName('/usr/bin/python3 -m http.server 8000')).toBe('python3')
+    expect(commandName('vite')).toBe('vite')
+    expect(commandName('')).toBe('')
+    // An app bundle's executable with spaces in its name is not cut at the first space.
+    expect(commandName('/Applications/My App.app/Contents/MacOS/My App --x')).toBe('My App')
+    expect(commandName('/Applications/My App.app/Contents/MacOS/My App')).toBe('My App')
+  })
+  it('reads the process name (c field) from lsof', () => {
+    const m = parseLsof(['p70', 'cMy App', 'f3', 'n*:8000', 'p71', 'c', 'f4', 'n*:8001'].join('\n'))
+    expect(m.get(70)).toEqual({ name: 'My App', listens: [{ host: '*', port: 8000 }] })
+    expect(m.get(71)!.name).toBeUndefined()
+  })
+  it('procsAllForRemote: a stray loses its path, arguments and cwd; session processes pass as they are', () => {
+    const procs = { k: [{ pid: 1, command: 'npm run dev', cwd: '/work/api' }] } as never
+    const all = {
+      at: 5,
+      sessions: procs,
+      strays: [
+        { pid: 70, command: '/Applications/My App.app/Contents/MacOS/My App --token=secret', cwd: '/work/api/docs', ports: [{ host: '*', port: 8000 }], startedAt: 1, folderOf: '/work/api', name: 'My App' },
+        { pid: 71, command: '/usr/bin/python3 -m http.server --dir /secret', cwd: '/work/web', ports: [], startedAt: 2, folderOf: '/work/web/' },
+        { pid: 72, command: 'vite', cwd: null, ports: [], startedAt: 3, folderOf: null },
+      ],
+    }
+    const r = procsAllForRemote(all)
+    expect(r.sessions).toBe(procs)
+    expect(r.strays.map((s) => [s.command, s.cwd, s.folderOf])).toEqual([
+      ['My App', null, 'api'],
+      ['python3', null, 'web'],
+      ['vite', null, null],
+    ])
+    expect(JSON.stringify(r.strays)).not.toMatch(/secret|\/work/)
+    // The window's answer is left alone.
+    expect(all.strays[0].cwd).toBe('/work/api/docs')
+  })
+  it('finds nothing without folders', () => {
+    expect(findStrays(rows, info, [], [100], 0)).toEqual([])
   })
 })
 

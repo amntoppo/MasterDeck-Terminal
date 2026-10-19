@@ -112,6 +112,17 @@ import {
 import { ModCatalog, ModOff } from "./modOff";
 import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
+import { ActivityLog } from "./activityLog";
+import {
+  activityAnswer,
+  diffActivity,
+  inboxEvent,
+  meetingEvent,
+  noteEvent,
+  releaseEvents,
+  runEvent,
+  type ActivityEvent,
+} from "@shared/activityLog";
 import { Scheduler } from "./sched";
 import { SCHED_TICK_MS } from "@shared/sched";
 import { guardSessions, MeetingsIpc } from "./meetingsIpc";
@@ -245,7 +256,7 @@ import { PeerStore } from "./peers";
 import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
 import { SessionProcs } from "./sessionProcs";
-import { isPortUrl } from "@shared/sessionProcs";
+import { isPortUrl, procsAllForRemote } from "@shared/sessionProcs";
 import { isWebLink } from "@shared/termLinks";
 import {
   installStatusline,
@@ -369,12 +380,41 @@ async function reloadMods(): Promise<CliResult> {
     ? { ok: done > 0, message: `Reloading ${done} of ${idle.length}. ${failed.join("; ")}` }
     : { ok: true, message: `Reloading plugins in ${done} session${done === 1 ? "" : "s"}.` };
 }
+// The Dashboard's activity log (#183): <home>/activity.jsonl, read through activity:list only; never
+// in AppState or the remote snapshot. Fed by the state callback (diffActivity) and the stores' hooks
+// below, each through logActivity, so a failure there never breaks the callback or a store's write.
+/** When this process started: what the state carries from caches read before it is not news. */
+const processStart = Date.now();
+const activity = new ActivityLog(join(paths.home, "activity.jsonl"), {
+  onChange: () => emit(CH.activityChanged),
+});
+function logActivity(what: string, make: () => ActivityEvent | ActivityEvent[] | null): void {
+  try {
+    const e = make();
+    for (const x of Array.isArray(e) ? e : e ? [e] : []) activity.add(x);
+  } catch (err) {
+    console.error(`activity: ${what}: ${String((err as Error)?.message ?? err).slice(0, 200)}`);
+  }
+}
+/**
+ * The release lines already logged (subjects), read from the log once, so a restart does not repeat
+ * them. The log keeps 14 days: an offer still pending after that may be logged once more.
+ */
+let releasesSeen: Set<string> | null = null;
+function logRelease(s: UpdateState): void {
+  logActivity("release", () => releaseEvents(s, (releasesSeen ??= activity.subjects("release")), Date.now()));
+}
+
 // The user's notes. They leave this process two ways only: as answers of the notes handlers below,
 // and in this change event (a note's NoteMeta: its title, 120-character preview, ticket, `link` (the
 // session's key and name, a ticket) and `meeting` (id, title, time), to the window and to web tabs
 // that subscribed; never the text). Sessions may add to them (pumpNoteRequests) but never read them.
+// The activity log gets "a note was added" and the note's id only (noteEvent).
 const notes = new NotesStore(join(paths.home, "notes"), {
-  onChange: (c) => emit(CH.notesChanged, c),
+  onChange: (c) => {
+    emit(CH.notesChanged, c);
+    logActivity("note", () => noteEvent(c, Date.now()));
+  },
   repoOf: (repo) => fullRepo(repo),
 });
 // Side questions (Tools → BTW): asked through a forked `claude -p`, and `/btw` typed in a
@@ -408,6 +448,7 @@ const scheduler = new Scheduler(join(paths.home, "schedules.json"), {
     emit(CH.schedChanged);
     sources.changed();
   },
+  onRun: (r) => logActivity("schedule", () => runEvent(r, Date.now())),
 });
 const btwStore = new BtwStore(join(paths.home, "btw"), (ev) => emit(CH.btwEvent, ev));
 const btwAsker = new BtwAsker(btwStore, () => claudeBin, env, paths.projectsDir);
@@ -1164,6 +1205,7 @@ const sources = new Sources(
       console.error(`remote sync: ${String(e)}`);
     }
     notify(diffEvents(prev, state, focused));
+    logActivity("state", () => diffActivity(prev, state, Date.now(), processStart));
     // Dock badge: the Needs-you count.
     if (state.settings.dockBadge) app.setBadgeCount(state.inbox.open.length);
     else if (prev?.settings.dockBadge) app.setBadgeCount(0);
@@ -1357,8 +1399,11 @@ function notifyItem(entry: Parameters<typeof inboxNotice>[0]): void {
 }
 
 // Needs you: a new item announces itself (the inbox's events; items there at startup stay quiet).
+// A resolution is logged (not a dismissed one, nor an item the last run left that is gone at launch);
+// the inbox resolves nothing while it is silent.
 sources.inbox.on("event", (e) => {
   if (e.type === "added") notifyItem(e.entry);
+  else if (e.type === "resolved") logActivity("inbox", () => inboxEvent(e.entry, Date.now(), processStart));
 });
 
 /** Answer the menu on a session's screen, if it is still the question the user saw. */
@@ -2846,6 +2891,11 @@ function registerIpc(): void {
   });
   // Schedules (#140). The web asked with webConfirm before a delete; the window asks here.
   reg.handle(CH.schedList, () => scheduler.list());
+  // The Dashboard's Timeline (#183): activityAnswer checks the range (at most 31 days).
+  // A web tab gets meetings without their titles (forRemote): meetings are the Mac's only.
+  reg.handle(CH.activityList, (e, since: unknown, until: unknown) =>
+    activityAnswer((s, u) => activity.list(s, u), since, until, isRemote(e)),
+  );
   reg.handle(CH.schedSave, (_e, input: unknown) => scheduler.save(input));
   reg.handle(CH.schedEnable, (_e, id: unknown, on: unknown) =>
     typeof id === "string" ? scheduler.enable(id, on === true) : { ok: false, message: "no schedule" },
@@ -3999,6 +4049,19 @@ function registerIpc(): void {
       ? sessionProcs.output(key, pid as number)
       : { ok: false, message: "bad request" },
   );
+  // One read for every caller: concurrent asks share it, and an answer younger than 15 s is reused.
+  reg.handle(CH.procsAll, async (e) => {
+    const all = await sessionProcs.shared(() =>
+      (latest?.sessions ?? []).map((s) => ({
+        key: s.key,
+        pid: s.state === "done" ? null : s.pid,
+        cwd: s.cwd || null,
+        worktrees: (latest?.sessionWorktrees[s.key] ?? []).map((w) => w.path),
+      })),
+    );
+    // A stray was started by anyone, not a session: a web tab gets its name and folder's name only.
+    return isRemote(e) ? procsAllForRemote(all) : all;
+  });
   reg.on(CH.openPort, (e, url: unknown) => {
     if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);
   });
@@ -4254,6 +4317,7 @@ function makeUpdater(): Updater {
     win?.webContents.send(CH.updateChanged, s);
     setAppMenu(s);
     announceUpdate(s);
+    logRelease(s);
   });
   return u;
 }
@@ -4397,6 +4461,7 @@ const confirmStopRecording = oneAtATime(async (parent: BrowserWindow | null, the
 // nothing at startup asks macOS for the microphone or the screen (spec §1, meetingsStartup.test.ts).
 const meetings = new MeetingsIpc({
   platform: process.platform,
+  onMeetingEnded: (m) => logActivity("meeting", () => meetingEvent(m, Date.now())),
   meetings: () => sources.getSettings().meetings,
   setMeetings: (m) => {
     sources.setSettings({ ...sources.getSettings(), meetings: m });
@@ -4681,6 +4746,7 @@ app.whenReady().then(async () => {
   claudeBin = await resolveClaude(env());
   updater = makeUpdater();
   setAppMenu(updater.state());
+  logRelease(updater.state());
   registerIpc();
   // masterdeck-media://meeting/<id>/audio → that meeting's audio.webm, nothing else. The window's
   // session only: the capture window's partition has no such scheme, and the web bridge never relays it.

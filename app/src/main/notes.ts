@@ -133,9 +133,10 @@ export class NotesStore {
       } catch {}
       return { ok: false, message: this.diskError('save', e), retry: true }
     }
+    const created = !this.notes.has(note.id)
     this.notes.set(note.id, note)
     const meta = noteMeta(note)
-    this.notify({ id: note.id, meta })
+    this.notify(created ? { id: note.id, meta, created: true } : { id: note.id, meta })
     return { ok: true, meta }
   }
 

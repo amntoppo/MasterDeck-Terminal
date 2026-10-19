@@ -1,9 +1,12 @@
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import type { Runner } from './run'
 import { readTail } from './files'
 import {
   cleanOutput,
   EXITED_KEEP_MS,
+  findStrays,
+  insideFolder,
   parseLsof,
   parsePs,
   PS_ARGS,
@@ -12,6 +15,7 @@ import {
   transcriptTasks,
   uniquePorts,
   type LsofInfo,
+  type ProcsAll,
   type ProcsAnswer,
   type SessionProc,
   type TranscriptTasks,
@@ -23,6 +27,14 @@ export interface ProcsSession {
   /** Its `claude` process; null: not running. */
   pid: number | null
   transcript: string | null
+}
+
+/** A session for `listAll`: its `claude` process (null: not running), its folder and worktrees. */
+export interface ProcsAllSession {
+  key: string
+  pid: number | null
+  cwd: string | null
+  worktrees: string[]
 }
 
 interface Seen {
@@ -43,6 +55,36 @@ const PS = existsSync('/bin/ps') ? '/bin/ps' : 'ps'
 const LSOF = existsSync('/usr/sbin/lsof') ? '/usr/sbin/lsof' : 'lsof'
 /** A session no one asked about for this long is forgotten. */
 const FORGET_MS = 60 * 60 * 1000
+/** How long `shared` reuses the last `procs:all` answer, for every caller (window and web tabs). */
+export const PROCS_ALL_REUSE_MS = 15_000
+
+/** "ps failed (exit 1)", "lsof timed out": no output, so no paths reach the screen or the web. */
+const failed = (what: string, code: number): string => (code === -2 ? `${what} timed out` : `${what} failed (exit ${code})`)
+
+const real = (p: string): string => {
+  try {
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+/**
+ * The folders strays are looked for in: each as given and as its real path (lsof reports
+ * `/private/tmp` for `/tmp`), without `/`, the home folder or a parent of it.
+ * ponytail: a session started in ~ (or /) finds no strays, since nearly every listener on the
+ * machine sits below it and would send its command line to the web; a list of folders that hold
+ * no project (Library, Applications…) would let such a session's own servers through.
+ */
+export function strayFolders(folders: (string | null)[], home: string): string[] {
+  const homes = [home, real(home)]
+  const out = new Set<string>()
+  for (const f of folders) {
+    if (!f) continue
+    for (const p of [f, real(f)]) if (p !== '/' && !homes.some((h) => insideFolder(h, p))) out.add(p)
+  }
+  return [...out]
+}
 
 /**
  * A session's running processes, read when the Details panel asks (`procs:list`): one `ps` for the
@@ -53,11 +95,14 @@ const FORGET_MS = 60 * 60 * 1000
  */
 export class SessionProcs {
   private seen = new Map<string, Seen>()
+  private allRead: Promise<ProcsAll> | null = null
+  private allLast: ProcsAll | null = null
 
   constructor(
     private run: Runner,
     private platform: NodeJS.Platform = process.platform,
     private now: () => number = Date.now,
+    private home: string = homedir(),
   ) {}
 
   async list(s: ProcsSession): Promise<ProcsAnswer> {
@@ -118,6 +163,98 @@ export class SessionProcs {
     const ended = [...seen.ended.values()].map(({ taskId: _t, ...p }) => p)
     running = running.sort((a, b) => a.startedAt - b.startedAt)
     return { ok: true, supported: true, running: s.pid !== null, procs: [...running, ...ended.sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))] }
+  }
+
+  /**
+   * Every listed session's running processes and the strays in their folders (`procs:all`, the
+   * Dashboard): one `ps`, one `lsof` for the listening sockets on the machine, one `lsof` for the
+   * folders and stdouts of the sessions' processes and the listeners. Never exited rows, and it
+   * only reads `seen` (the groups list() saw), so Details → Processes is unchanged by it.
+   * ponytail: no transcript is read, so a shell is `background` when its stdout is a task output
+   * file (recent Claude Code versions write a foreground call's there too); Details has the exact kind.
+   */
+  /**
+   * `listAll` for `procs:all`: callers asking while a read runs share it, and an answer younger than
+   * 15 s is given again, so a window and several web tabs polling the Dashboard cost one read.
+   * `sessions` is asked for only when a read starts.
+   */
+  shared(sessions: () => ProcsAllSession[]): Promise<ProcsAll> {
+    if (this.allRead) return this.allRead
+    const last = this.allLast
+    if (last && this.now() - last.at < PROCS_ALL_REUSE_MS && this.now() >= last.at) return Promise.resolve(last)
+    const read = this.listAll(sessions())
+      .then((a) => {
+        this.allLast = a
+        return a
+      })
+      .finally(() => {
+        this.allRead = null
+      })
+    this.allRead = read
+    return read
+  }
+
+  async listAll(sessions: ProcsAllSession[]): Promise<ProcsAll> {
+    const at = this.now()
+    if (this.platform === 'win32' || !sessions.length) return { at, sessions: {}, strays: [] }
+    const [ps, socks] = await Promise.all([
+      this.run(PS, PS_ARGS, { timeoutMs: 5000 }),
+      // `+c 0`: the whole process name (the `c` field), which is all a web tab gets of a stray.
+      this.run(LSOF, ['-nP', '-w', '+c', '0', '-iTCP', '-sTCP:LISTEN', '-Fpcfn'], { timeoutMs: 5000 }),
+    ])
+    // Without the table nothing can be said: not "nothing running".
+    if (ps.code !== 0) return { at, sessions: {}, strays: [], error: failed('ps', ps.code) }
+    const rows = parsePs(ps.stdout)
+    const listens = parseLsof(socks.stdout)
+    // lsof exits 1 with nothing on stderr when nothing listens on the machine: that is an answer.
+    // Anything else with no output (a timeout, a refusal) leaves the ports unknown, not none.
+    const nothingListens = socks.code === 1 && !socks.stderr.trim()
+    const live = sessions.filter((s) => s.pid !== null)
+    const groups = new Map(live.map((s) => [s.key, sessionGroups(rows, s.pid!, new Set(this.seen.get(s.key)?.groups), at)]))
+    const claimed = new Set([...groups.values()].flatMap((gs) => gs.flatMap((g) => g.pids)))
+    const pids = new Set(claimed)
+    for (const [pid, i] of listens) if (i.listens.length) pids.add(pid)
+    let error = socks.code !== 0 && !listens.size && !nothingListens ? failed('lsof', socks.code) : undefined
+    let files = new Map<number, LsofInfo>()
+    if (pids.size) {
+      // lsof exits 1 when one of the pids has nothing to list; its output still counts.
+      const r = await this.run(LSOF, ['-nP', '-w', '-a', '-d', 'cwd,1', '-p', [...pids].sort((a, b) => a - b).join(','), '-Fpftn'], { timeoutMs: 5000 })
+      files = parseLsof(r.stdout)
+      if (r.code !== 0 && !files.size) error = failed('lsof', r.code)
+    }
+    for (const [pid, i] of listens) {
+      const had = files.get(pid)
+      if (had) {
+        had.listens.push(...i.listens)
+        had.name ??= i.name
+      } else files.set(pid, i)
+    }
+    const out: Record<string, SessionProc[]> = {}
+    for (const s of sessions)
+      out[s.key] = (groups.get(s.key) ?? [])
+        .map((g): SessionProc => {
+          const lead = files.get(g.pid)
+          return {
+            pid: g.pid,
+            command: g.command,
+            kind: !g.shell ? 'detached' : taskIdOf(lead?.out) ? 'background' : 'foreground',
+            cwd: lead?.cwd ?? g.pids.map((x) => files.get(x)?.cwd).find(Boolean) ?? null,
+            startedAt: g.startedAt,
+            state: 'running',
+            exitCode: null,
+            endedAt: null,
+            ports: uniquePorts(g.pids.flatMap((x) => files.get(x)?.listens ?? [])),
+            cpu: g.cpu,
+            memKb: g.memKb,
+            children: g.children,
+            // Its output is read through list() (Details), which keeps the paths.
+            hasOutput: false,
+          }
+        })
+        .sort((a, b) => a.startedAt - b.startedAt)
+    if (error) return { at, sessions: out, strays: [], error }
+    const folders = strayFolders(sessions.flatMap((s) => [s.cwd, ...s.worktrees]), this.home)
+    return { at, sessions: out, strays: findStrays(rows, files, folders, live.map((s) => s.pid!), at, claimed) }
   }
 
   /** The last few KB a process of this session wrote, when its stdout is a file (only one the last list found). */

@@ -150,7 +150,23 @@ describe('NotesStore', () => {
   it('tells every write to onChange', () => {
     const s = open()
     const a = saved(s.save({ title: 't', body: 'b', base: null }))
-    expect(changes).toEqual([{ id: a.id, meta: a }])
+    expect(changes).toEqual([{ id: a.id, meta: a, created: true }])
+  })
+
+  it('created: only on the write that made the note (save, append, a ticket note)', () => {
+    const s = open()
+    const a = saved(s.save({ title: 't', body: 'b', base: null }))
+    saved(s.save({ id: a.id, title: 't', body: 'c', base: a.updated }))
+    s.append({ id: a.id }, 'more')
+    s.append({ ticket: { repo: 'acme/web', number: 42 } }, 'first')
+    s.append({ ticket: { repo: 'acme/web', number: 42 } }, 'second')
+    expect(changes.map((c) => ('created' in c ? c.created : undefined))).toEqual([true, undefined, undefined, true, undefined])
+    // A ticket note emptied is removed; saved again, it is new again.
+    const t = s.get('t-acme~web~42')!
+    s.save({ ticket: { repo: 'acme/web', number: 42 }, title: '', body: '', base: t.updated })
+    changes = []
+    s.save({ ticket: { repo: 'acme/web', number: 42 }, title: '', body: 'back', base: null })
+    expect(changes).toMatchObject([{ id: 't-acme~web~42', created: true }])
   })
 
   it('a skipped file with a note name is never overwritten or deleted', () => {

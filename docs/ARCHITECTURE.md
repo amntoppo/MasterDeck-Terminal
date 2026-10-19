@@ -560,7 +560,9 @@ writes, the mods read, so one poller serves every session. `mods/` is a local-fo
   the last 12 KB of the stdout file of a process the last list found (never a path from the
   caller), ANSI and `\r` redraws cleaned (`cleanOutput`). `deck.openPort(url)` (`procs:openPort`,
   blocked on the web and refused for a remote call) opens only `http://localhost|<IP>:<port>`
-  (`isPortUrl`). Windows answers `supported: false`.
+  (`isPortUrl`). Windows answers `supported: false`. The Dashboard reads every session's processes
+  at once through `procs:all` (`SessionProcs.listAll`, see "The Dashboard" below), which only reads
+  the groups `list()` saw and never changes what Details shows.
 - **Session details → GitHub** (#103, `renderer/.../GitHubDetails.tsx`; the tab is kept in
   localStorage `md.detailsTab`, open rows in a module map per `Session.key`): ticket, PRs and
   monitors as rows that open. What is not in `AppState` is read on demand, never added to it (the web
@@ -2163,6 +2165,150 @@ figure from `[from, to)`; the ticket table's All time column stays all-time (the
 `HoursView` takes the same `from`/`to`: `estimateHours` cuts the joined spans to it before the
 per-day split.
 
+### The Dashboard and the activity log (issue #183)
+
+Spec and plan: `docs/superpowers/{specs,plans}/2026-10-18-dashboard*`. The Dashboard is a view
+(`View` `"dashboard"`, first in `RAIL_DEFAULT`, so a saved rail order gains it on top; `WEB_VIEWS`
+with no needs; the palette's `view:dashboard`; first in the phone bar's More) built from what the
+renderer already has, plus one new store, the activity log. Nothing new is polled (#160).
+
+**The view** (`renderer/src/components/DashboardView.tsx`): Needs attention full width, then a grid
+of the other five cards (`dashboard/{AttentionCard,NowCard,TimelineCard,DeliveryCard,UsageCard,HealthCard,Card,Sparkline}.tsx`).
+- Every card's figures come from a pure function of `shared/dashboard.ts`: `attentionItems`
+  (Needs-you items in tiers by priority: ≥ 80 `now`, 30–79 `soon`, < 30 `info`, and a `ci` item
+  `now` like the derived CI row; derived PR, review request, failed run, monitor / PR-watch error and
+  update rows; a `ci` / `review` offer hides only its own PR's matching reason (CI, or changes
+  requested and threads); one row per PR; a review request has one fingerprint (its `updatedAt`)
+  from either source, and a PR the team's read has as draft or closed is left out; sort tier, rank,
+  oldest first, id; `max` 8, 5 compact),
+  `nowView`, `deliveryView`, `usageView`, `healthView`, `pruneDismissed`, `relTime`.
+- **Slices, not the state:** each card's input is a `useMemo` on the slices it reads, passed
+  through `useStable` (`renderer/src/useStable.ts`: keeps the last reference while the value's JSON
+  is the same), and every card is `memo()`'d, so a state push that changes nothing a card shows
+  does not draw it. `now` is `useNow(60_000)` rounded to the minute. Navigation goes through one
+  stable `DashNav` object (`dashboard/nav.ts`, `go()`), which calls App's latest callbacks.
+- **Reply…** draws the real Needs-you card (`InboxCard.tsx`, moved out of `Sidebar.tsx`
+  unchanged) under its row; it acts through `inboxAct` → `runInboxAction` like the Needs-you list.
+  A derived row's dismissal is `{id, fingerprint}` in localStorage `md.dashboard.dismissed` (200 at
+  most; pruned of subjects gone, except those of a source still loading); an inbox row is dismissed
+  through `inboxAct(id, "dismiss")`.
+- **Pulls, never a timer** (no `setInterval` anywhere in the view; no animation but the drag
+  transform; skeletons are static):
+  - `sched:list` on mount and on `sched:changed`.
+  - `procs:all` on mount, on **Refresh**, and when the set of sessions at work changes, at most
+    once a minute (a one-off `setTimeout` to the end of the minute, dropped if the set changes
+    again or the view closes); never two at once.
+  - `janitor(liveDirs(state), false)` only on **Check worktrees**.
+  - `tokensByDay` when the set of ids in the cost book changes, as Costs does.
+  - `activity:list` for the range on mount, on a range change and on Retry; on
+    `activity:changed` only from 15 minutes before the newest event shown, merged in by id
+    (`mergeActivity`), and only while the range is still open (not Yesterday). The web reads at
+    most every 15 s.
+  - The last `procs:all` and janitor answers are module-level caches for the window's life, so
+    switching views and back within a minute reads nothing.
+- **Compact:** `usePhone()` in the web app, or the view's own width ≤ 760 px (a `ResizeObserver`
+  on its body) in the window: one column, Needs attention 5 rows, trimmed cards. Phone CSS in
+  `web/web.css` under `.app.phone.view-dashboard` (40 px targets, no drag handle).
+- **Customise** (`dashboard/customise.ts` `useCustomise`, the layout logic in
+  `shared/dashboardLayout.ts`: `CardId`, `DASH_DEFAULT`, `cleanLayout`, `layoutOrder`, `moveTo`,
+  `moveStep`, `dropNearest`, `isDefault`, `toSaved`): localStorage `md.dashboard.layout`
+  (`{order: [], hidden: []}` is the default, so a later default applies in full). A drag works on
+  the DOM alone (the card's transform and the marker's box) from the handle, after 4 px, with
+  pointer capture, like the rail's (#170); the other cards' boxes are measured when the drag
+  starts, relative to the grid, and a scroll during the drag is followed. ⌥ arrows call `moveStep`
+  and keep the focus; Esc cancels a drag, then leaves the mode. Needs attention is not in the layout.
+- **Open on:** `Settings.startView: "last" | "dashboard"` (default `"last"`, `normalizeSettings`),
+  applied once, on the first state, while the view is still the one it booted with
+  (`App.tsx`). The web app keeps its own in localStorage `md.startView` (`webStartView` /
+  `setWebStartView` in `renderer/src/web.ts`), read in the `view` initialiser; `remoteSettings`
+  (`main/remoteGuards.ts`) keeps the Mac's `startView` against a browser's patch.
+- **The Timeline's first week:** "The timeline starts recording on *date*" uses localStorage
+  `md.dashboard.since`, the first time this device showed the Dashboard (ponytail: asking main for
+  its first event is the exact answer). The filters are kept in `md.dashboard.timeline`.
+- **Usage and cost per account:** `CostEntry.account` (`shared/costs.ts`), set by `Sources` from
+  the session's `account`; `recordCosts` stores it on `SessionCost.account` and keeps an older one
+  when an entry has none; `validBook` accepts it as optional (a GitHub login, ≤ 39 characters).
+  Entries without one show as Unknown account.
+- **Web preview:** `src/web/preview/dashboardFixture.ts` gives every card data (activity over two
+  days, `procsAll` with a stray, a failed run, PRs in every stage, a failing monitor, costs over two
+  accounts); `?preview=empty` shows the empty states.
+
+**The activity log** (`shared/activityLog.ts`, pure; `main/activityLog.ts` `ActivityLog`, the
+store): `<home>/activity.jsonl`, one `ActivityEvent` per line (`id`, `at`, `type`, `title`,
+`detail?`, `account?`, `repo?`, `subject`, `target?`). Never in `AppState` or `toRemoteSnapshot`.
+- **From the state:** `diffActivity(prev, next, now, since)` in the state callback, through
+  `logActivity` (try/catch: a failure never breaks the callback). `prev` null (a restart) gives
+  nothing; a slice not loaded in either state says nothing (sessions need `sources.agents` ok in
+  both). `since` is `processStart`: PRs and the board load from the gh cache at launch, so a slice
+  whose `prev` was read before this process started is not news.
+  - `session-started` (a new key, not ended), `session-finished` (`working` → `idle` without
+    `busyWith`), `session-ended` (→ `done` / `suspended`, or a key gone whose name is not listed
+    under another key: a copy is not an end).
+  - `pr-opened` (a new `teamPrs` url created within the hour), `pr-reviewed` (decision became
+    APPROVED or CHANGES_REQUESTED, or a new review), `pr-merged` / `pr-closed` (newly set, within
+    the hour): only PRs of the user's logins or in a listed session's `sessionPrs`.
+  - `ticket-moved`: a board card's `status` changed, same sprint, not derived cards, not a card
+    new or gone.
+  - `commit-pushed`: `git[id].ahead` went from > 0 to 0 on the same branch and folder. A branch
+    with no upstream has ahead 0 (a first `git push -u` is not seen), git is read for visible
+    sessions only, and a `git reset` to the upstream reads as a push.
+- **From the stores**, each a pure mapper wired through `logActivity`: `runEvent` (`Scheduler`'s
+  new `onRun`, once per ended run: done, failed, skipped (subject `schedskip:<id>`, so skips
+  coalesce), stopped), `meetingEvent` (`MeetingStore`'s `onEnded`, through `MeetingsIpc`'s
+  `onMeetingEnded`; dated at the meeting's `ended`, so a recording recovered at launch lands on
+  its own day, and one older than 14 days is not logged; an empty failed recording is skipped), `noteEvent` (`NotesStore` passes
+  `created: true` on a note's first write; meeting notes are left out), `releaseEvents` (from the
+  update state: "Updated to x (from y)" and "MasterDeck x is available", once per version, the
+  logged subjects read back once from the log), `inboxEvent` (the inbox's `resolved` event, not a
+  dismissal, and not an item last seen before `processStart`; a meeting's item has the subject
+  `meeting-item:<id>`, since its title is the meeting's).
+- **Backdated events** (a merge GitHub reports at its own time) are inserted in order: memory stays
+  newest first, so `list(since, until)` stops at the first event before `since` without missing one.
+- **Notes are private:** a note's event is "A note was added" or "… to #42", with `target: {note:
+  id}` and a ticket's repo: never its title, preview or text (a test asserts it). A new event type
+  must keep to that.
+- **Coalescing** (`coalesce`): an event of the same `type` and `subject` within 15 minutes of the
+  last one replaces it in memory (keeping its id: time and title move) and is appended; on load
+  (`replay`) the newer line wins the same way. One busy session makes one "finished" line per 15
+  minutes.
+- **Load:** lines that do not parse or fail `cleanEvent` (strings cut to 300, a bad target dropped)
+  are skipped; 14 days and 5000 events are kept. When memory holds fewer lines than the file
+  (trimmed, skipped, coalesced) or the last line is torn, the file is rewritten from memory (temp
+  file + rename). After 5000 appends since the last load or rewrite it is rewritten the same way.
+- **Errors:** a write or rewrite failure is logged once a minute with its code only (no path) and
+  dropped; nothing throws into a caller.
+- **Channels:** `activity:list(since, until)` (`CH.activityList`, `remote`; `activityAnswer`): two
+  finite numbers, `since ≤ until`, at most 31 days apart, else `[]`; newest first, at most 1000. A
+  remote call gets `forRemote(events)`: meetings are the Mac's only, so a meeting's line becomes "A
+  meeting was recorded (*n* min)" with no target, and a meeting's Needs-you item that closed "A
+  meeting item was answered" with no target or detail. The Timeline's account and repository
+  filters (`filterActivity`) ignore case. `activity:changed` (`CH.activityChanged`, `event`, no
+  payload), throttled to once per 2 s.
+
+**`procs:all`** (`CH.procsAll`, `remote`; `SessionProcs.shared` → `listAll` in `main/sessionProcs.ts`;
+callers during a read share it, and an answer under 15 s old (`PROCS_ALL_REUSE_MS`) is given again,
+to the window and web tabs alike): every
+listed session (`pid` null when `done`, its `cwd` and `sessionWorktrees`) in three spawns: one `ps`,
+one `lsof +c 0 -iTCP -sTCP:LISTEN` for the machine's listeners (with their process names), one `lsof -d cwd,1` for the folders and
+stdouts of the sessions' processes and the listeners. Answers `ProcsAll` (`shared/sessionProcs.ts`:
+`at`, `sessions` by `Session.key`, running processes only, `strays`, `error?`). It only reads the
+groups `list()` saw (`seen`), so Details is unchanged by it.
+- A **stray** (`findStrays`) is a listening process whose cwd is inside a session folder or
+  worktree (`insideFolder`, whole path segments; `folderOf` the deepest), that is neither a session
+  pid nor below one, and not in a session's process group; a listener below another stray is
+  folded into the topmost one. `strayFolders` adds each folder's real path (lsof reports
+  `/private/tmp`) and drops `/`, the home folder and its parents (ponytail: a session in `~` finds
+  no strays, since nearly every listener sits below it). Only processes with ports are found.
+- `ps` failing answers empty lists with `error` ("ps failed (exit 1)"; either `lsof` that fails with
+  nothing read gives "lsof failed (exit n)" or "… timed out"; never output or paths; the
+  machine-wide one's exit 1 with nothing on stderr is "nothing listens", not a failure). The cards then
+  say the read failed rather than "nothing running".
+- A remote call gets `procsAllForRemote(all)`: each stray's `command` is its process name (lsof's
+  `c` field, else the executable's base name, `commandName`), `cwd` null and `folderOf` the folder's
+  base name: a stray was started by anyone, not a session, so its argv and paths stay on the Mac.
+  Session processes pass as they are (`procs:list` sends them already). Windows (or no sessions)
+  answers `{at, sessions: {}, strays: []}`.
+
 ### In-app updates (issue #122)
 
 Spec: backend repo, `docs/superpowers/specs/2026-10-16-in-app-updates-design.md` (§1 the release
@@ -2263,6 +2409,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
 | Schedules | `sched.ts` (schedules, slots in a time zone, a tick's plan, how a run is going) |
+| Dashboard | `dashboard.ts` (each card's view: `attentionItems`, `nowView`, `deliveryView`, `usageView`, `healthView`), `dashboardLayout.ts` (Customise's order and hidden cards), `activityLog.ts` (`diffActivity`, the stores' mappers, `coalesce`, `filterActivity`, `forRemote`), `sessionProcs.ts` (`ProcsAll`, `findStrays`, `procsAllForRemote`) |
 | Workflows, hooks | `flow.ts`, `flowFrame.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |
@@ -2300,7 +2447,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
   order is drawn at once (local state keyed by the saved one) and saved over a fresh `getSettings`
   with the unknown ids put back (`toSaved(order, saved)`); a browser may change it (`remoteSettings`
   passes it). `PhoneBar` does not read it.
-- Views (`View` in `Sidebar.tsx`): `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
+- Views (`View` in `Sidebar.tsx`): `dashboard` (`DashboardView`, see "The Dashboard" above), `terminals`, `board` (`BoardView`), `prs` (`PrsView`), `tasks`
   (`TasksView`), `costs` (`CostsView`; its Hours choice is `HoursView`), `janitor` (`HygieneViews`), `workflow` (`WorkflowView` +
   `FlowEditor`), `settings` (`SettingsView` + `AccountPanel`), `history` (`HistoryDialog`).
 - Notes is a panel over the current view, not a view: the Rail's button (`notesOpen` / `onNotes`,
@@ -2388,6 +2535,7 @@ Under `MASTERDECK_HOME` (default `~/.claude/masterdeck`):
 | `session-history.json`, `session-prs.json`, `session-status.json`, `running-sessions.json` | session ids per background session, PRs per session, manual statuses, restart list |
 | `summaries/`, `templates.json`, `skills.json` | session summaries, Start-dialog templates, removed skills |
 | `watches.json` | monitors MasterDeck runs |
+| `activity.jsonl` | The Dashboard's activity log (#183): one event per line, appended; 14 days and 5000 events, rewritten from memory (temp file + rename) on load when it held more, and after 5000 appends (`main/activityLog.ts`). A note's line carries its id and ticket only |
 | `schedules.json` | Schedules (#140): `{version: 1, schedules, runs}` (50 runs per schedule), temp file + rename by `main/sched.ts`; an unreadable one is copied aside as `schedules.json.unreadable-<ts>` |
 | `mod-off.json`, `mod-catalog.json` | the mods switched off per session (`{Session.key: [names]}`) and every mod seen (`main/modOff.ts`) |
 | `mods/`, `mods-installed.json` | MasterDeck's copy of its mods, the local-folder marketplace Claude Code reads (`.masterdeck-mods.json` marks the copied hash), and when MasterDeck last installed them (`main/mods.ts`) |

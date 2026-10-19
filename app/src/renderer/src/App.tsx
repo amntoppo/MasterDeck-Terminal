@@ -24,6 +24,7 @@ import {
 } from "./components/CommandPalette";
 import { CostsView } from "./components/CostsView";
 import { JanitorView } from "./components/HygieneViews";
+import { DashboardView } from "./components/DashboardView";
 import { MeetingsView, type MeetingTarget } from "./components/MeetingsView";
 import { meetingsHere, setMeetingOpener } from "./meetingLinks";
 import { PrsView } from "./components/PrsView";
@@ -52,7 +53,7 @@ import { SkillsDialog } from "./components/SkillsDialog";
 import { WorkflowView } from "./components/WorkflowView";
 import { SchedulesView } from "./components/SchedulesView";
 import { Sidebar, type View } from "./components/Sidebar";
-import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone } from "./web";
+import { can, isWeb, keyPlatform, screenOk, shortcutOk, usePhone, webStartView } from "./web";
 import { accountLabel, isMulti } from "@shared/accounts";
 import { SessionAccount } from "./components/AccountBits";
 import { QUICK_KEYS } from "./quickKeys";
@@ -211,9 +212,12 @@ export function App() {
     load<boolean>("masterOpen", true),
   );
   const [view, setView] = useState<View>(() => {
+    // Open on (#183): the web's choice is this browser's; the Mac's comes with the first state (below).
+    if (isWeb() && webStartView() === "dashboard") return "dashboard";
     const v = load<string>("view", isWeb() ? "tasks" : "terminals");
     return (
       [
+        "dashboard",
         "terminals",
         "board",
         "prs",
@@ -229,6 +233,9 @@ export function App() {
       ? (v as View)
       : "terminals";
   });
+  // The view this launch opened on, and whether the Mac's Open on was applied (once; the web's is above).
+  const [bootView] = useState(view);
+  const [startApplied, setStartApplied] = useState(isWeb);
   // Phone only: the session list, the open screen (a terminal or a view), or master; and the panel sheet.
   const [phoneScreen, setPhoneScreen] = useState<PhoneScreen>(() =>
     view === "terminals" ? "list" : "main",
@@ -350,10 +357,12 @@ export function App() {
   useEffect(() => {
     if (!screenOk(view)) setView("tasks");
   }, [view]);
+  useEffect(() => save("view", view), [view]);
+  // Only once the start view is applied: on the Mac, Open on = Dashboard replaces a saved Board
+  // with the first state, and telling main the Board is open before that starts a wasted read.
   useEffect(() => {
-    save("view", view);
-    deck().setBoardOpen(view === "board");
-  }, [view]);
+    if (startApplied) deck().setBoardOpen(view === "board");
+  }, [view, startApplied]);
   // Phone: the Notes sheet covers the screen, so a screen chosen from anywhere (the palette, a result, a tab) must close
   // it. Closing unmounts the panel, which sends what is typed. The desktop panel stays open across views.
   const screenKey = `${view}/${phoneScreen}`;
@@ -1054,6 +1063,15 @@ export function App() {
     };
   }, [dragging, masterOpen, masterPct, state?.config.masterEnabled]);
 
+  // Open on (#183), the Mac: its setting comes with the first state, and nothing but "Loading
+  // sessions…" is drawn before it. Set during this render, before any view mounts, so another view
+  // never flashes (or attaches its terminals) first; skipped when the view already changed (a
+  // notification, a shortcut).
+  if (state && !startApplied) {
+    setStartApplied(true);
+    if (state.settings.startView === "dashboard" && view === bootView) setView("dashboard");
+  }
+
   if (!state) {
     return (
       <div className="welcome">
@@ -1387,6 +1405,44 @@ export function App() {
               state.prLive[url]?.title ?? "",
             );
           }}
+        />
+      )}
+      {view === "dashboard" && (
+        <DashboardView
+          state={state}
+          update={update}
+          onOpenSession={openSession}
+          onIssue={onIssue}
+          onTicket={(t) => {
+            const issue =
+              state.issues.find((i) => sameTicket(i, t)) ??
+              (() => {
+                const card = state.board?.cards.find((c) => sameTicket(c, t));
+                return card ? issueOf(card) : null;
+              })();
+            if (issue) onIssue(issue);
+            else setView("board");
+          }}
+          onStartWith={startWithInstructions}
+          onOpenMeeting={(id) => openMeeting(id, null)}
+          onPr={(url, title) => {
+            const s = state.sessions.find((x) =>
+              (state.sessionPrs[x.sessionId] ?? []).includes(url),
+            );
+            openPr(url, s ? sessionTicket(s) : null, title || (state.prLive[url]?.title ?? ""));
+          }}
+          onView={(v) => setView(v as View)}
+          onSettings={(section) => {
+            setSettingsAt({ section: section as SettingsSection, at: Date.now() });
+            setView("settings");
+          }}
+          onNeedsYou={() => {
+            setView("terminals");
+            if (phone) setPhoneScreen("list");
+            // After the Terminals screen is drawn, where the Needs-you list lives.
+            setTimeout(() => needsYouRef.current?.scrollIntoView({ behavior: "smooth" }), 0);
+          }}
+          onNote={(id) => setNotesAt({ id })}
         />
       )}
       {view === "costs" && (

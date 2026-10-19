@@ -90,4 +90,47 @@ describe('costs', () => {
     expect(b.a.days).toEqual({ '2026-08-01': 3, '2026-10-09T10': 4 })
     expect(dailySpend(b)).toEqual({ '2026-08-01': 3, '2026-10-09': 1 })
   })
+  it('records the session\'s account: set when given, kept when missing, updated when changed', () => {
+    const b: CostBook = {}
+    recordCosts(b, [{ ...e('a', 1), account: 'alice' }, e('b', 1)], '2026-10-18T09')
+    expect(b.a.account).toBe('alice')
+    expect('account' in b.b).toBe(false)
+    expect(recordCosts(b, [e('a', 2)], '2026-10-18T10')).toBe(true)
+    expect(b.a.account).toBe('alice')
+    expect(recordCosts(b, [{ ...e('a', 2), account: 'bob' }], '2026-10-18T10')).toBe(true)
+    expect(b.a.account).toBe('bob')
+    expect(recordCosts(b, [{ ...e('a', 2), account: 'bob' }], '2026-10-18T10')).toBe(false)
+    expect(dailySpend(b)).toEqual({ '2026-10-18': 3 })
+  })
+  it('a first sighting kept as a baseline keeps the account too', () => {
+    const b: CostBook = {}
+    const today = Date.parse('2026-10-18T00:00:00')
+    recordCosts(b, [{ ...e('old', 5), account: 'alice', startedAt: today - 1 }], '2026-10-18T09', today)
+    expect(b.old).toEqual({ name: 'old', key: 'old', issue: 7, account: 'alice', days: { '0000-baseline': 5 } })
+  })
+  it('validBook keeps a good account, drops a bad one, and reads an old book unchanged', () => {
+    const days = { '2026-10-18T09': 1 }
+    expect(validBook({
+      a: { name: 'a', key: 'a', issue: null, account: 'alice', days },
+      b: { name: 'b', key: 'b', issue: null, account: 'x'.repeat(40), days },
+      c: { name: 'c', key: 'c', issue: null, account: 3, days },
+      d: { name: 'd', key: 'd', issue: null, account: 'x'.repeat(39), days },
+      e: { name: 'e', key: 'e', issue: null, account: '', days },
+    })).toEqual({
+      a: { name: 'a', key: 'a', issue: null, account: 'alice', days },
+      b: { name: 'b', key: 'b', issue: null, days },
+      c: { name: 'c', key: 'c', issue: null, days },
+      d: { name: 'd', key: 'd', issue: null, account: 'x'.repeat(39), days },
+      e: { name: 'e', key: 'e', issue: null, days },
+    })
+    const old = { s: { name: 's', key: 's', issue: 4, issueRepo: 'acme/api', days: { '2026-09-24': 2 } } }
+    expect(validBook(JSON.parse(JSON.stringify(old)))).toEqual(old)
+  })
+  it('pruneBook keeps the account', () => {
+    const b: CostBook = {}
+    recordCosts(b, [{ ...e('a', 10), account: 'alice' }], '2026-01-01')
+    recordCosts(b, [{ ...e('a', 12), account: 'alice' }], '2026-09-24')
+    pruneBook(b, '2026-09-25', 30)
+    expect(b.a).toEqual({ name: 'a', key: 'a', issue: 7, account: 'alice', days: { '0000-baseline': 10, '2026-09-24': 12 } })
+  })
 })
