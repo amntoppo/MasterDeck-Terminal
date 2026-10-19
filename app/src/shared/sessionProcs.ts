@@ -193,13 +193,15 @@ export function sessionGroups(rows: ProcRow[], root: number, groups: ReadonlySet
 
 /** One process's open files that matter here: its folder, its stdout, its listening sockets. */
 export interface LsofInfo {
+  /** The process name (lsof's `c` field, when asked for): no path, no arguments. */
+  name?: string
   cwd?: string
   /** stdout, when it is a regular file. */
   out?: string
   listens: Listen[]
 }
 
-/** lsof's `-F` output (`p`, `f`, `t`, `n` fields) → per pid. */
+/** lsof's `-F` output (`p`, `c`, `f`, `t`, `n` fields) → per pid. */
 export function parseLsof(text: string): Map<number, LsofInfo> {
   const map = new Map<number, LsofInfo>()
   let cur: LsofInfo | null = null
@@ -215,7 +217,9 @@ export function parseLsof(text: string): Map<number, LsofInfo> {
       fd = ''
       type = ''
     } else if (!cur) continue
-    else if (tag === 'f') {
+    else if (tag === 'c') {
+      if (val) cur.name = val
+    } else if (tag === 'f') {
       fd = val
       type = ''
     } else if (tag === 't') type = val
@@ -364,6 +368,8 @@ export interface StrayProc {
   startedAt: number
   /** The session folder or worktree it sits in (the deepest that holds it). */
   folderOf: string | null
+  /** Its process name from lsof (no path, no arguments), when lsof gave one. */
+  name?: string
 }
 
 /** Every session's running processes, by Session.key, and the strays (`procs:all`). */
@@ -375,10 +381,39 @@ export interface ProcsAll {
   error?: string
 }
 
-/** A command line's executable, base name only (`/usr/bin/python3 -m http.server` → `python3`): what a web tab gets of a stray. */
+/**
+ * A command line's executable, base name only (`/usr/bin/python3 -m http.server` → `python3`), for
+ * when lsof gave no process name. An app bundle's executable may hold spaces (`/Applications/My
+ * App.app/Contents/MacOS/My App --x` → `My App`); any other path is cut at the first space.
+ */
 export function commandName(command: string): string {
+  const app = /\.app\/Contents\/MacOS\/(.+?)(?:\s+-|$)/.exec(command.trim())
+  if (app) return app[1].trim()
   const exe = command.trim().split(/\s+/)[0] ?? ''
   return exe.slice(exe.lastIndexOf('/') + 1)
+}
+
+/** The last segment of a path (`/work/api/` → `api`). */
+const baseName = (p: string): string => {
+  const t = p.length > 1 ? p.replace(/\/+$/, '') : p
+  return t.slice(t.lastIndexOf('/') + 1) || t
+}
+
+/**
+ * `procs:all` as a web tab gets it. A stray was started by anyone, not a session: the tab gets its
+ * process name (lsof's, else the executable's base name; never a path or its arguments), its
+ * folder's base name, and no cwd. Session processes pass as they are (`procs:list` sends them already).
+ */
+export function procsAllForRemote(all: ProcsAll): ProcsAll {
+  return {
+    ...all,
+    strays: all.strays.map((s) => ({
+      ...s,
+      command: s.name || commandName(s.command),
+      cwd: null,
+      folderOf: s.folderOf === null ? null : baseName(s.folderOf),
+    })),
+  }
 }
 
 /** Is `path` the folder or inside it, on whole path segments (`/a/b` holds `/a/b/c`, not `/a/bc`)? */
@@ -427,7 +462,7 @@ export function findStrays(
     if (!i.listens.length || !row || !i.cwd || sessions.has(pid) || claimed.has(pid)) continue
     const folder = deepest(i.cwd)
     if (folder === null || ancestors(pid).some((a) => sessions.has(a))) continue
-    found.set(pid, { pid, command: row.command, cwd: i.cwd, ports: i.listens, startedAt: now - row.elapsed * 1000, folderOf: folder })
+    found.set(pid, { pid, command: row.command, cwd: i.cwd, ports: i.listens, startedAt: now - row.elapsed * 1000, folderOf: folder, ...(i.name ? { name: i.name } : {}) })
   }
   const out: StrayProc[] = []
   for (const s of found.values()) {

@@ -14,6 +14,7 @@ import {
   inboxEvent,
   mergeActivity,
   meetingEvent,
+  activityAnswer,
   noteEvent,
   releaseEvents,
   runEvent,
@@ -245,6 +246,11 @@ describe('filterActivity', () => {
     expect(filterActivity(es, { account: 'acme-bot' }).map((e) => e.at)).toEqual([3, 1])
     expect(filterActivity(es, { groups: ['prs', 'tickets'], account: 'acme-bot', repo: 'acme/web' }).map((e) => e.at)).toEqual([1])
   })
+  it('account and repository ignore case', () => {
+    expect(filterActivity(es, { account: 'Acme-Bot' }).map((e) => e.at)).toEqual([3, 1])
+    expect(filterActivity(es, { repo: 'ACME/web' }).map((e) => e.at)).toEqual([1])
+    expect(filterActivity([ev(4, { account: 'ACME-TWO' })], { account: 'acme-two' }).map((e) => e.at)).toEqual([4])
+  })
   it('every type has a tag, and a group except release', () => {
     expect(TYPE_TAG['commit-pushed']).toBe('GIT')
     expect(TYPE_GROUP['meeting']).toBe(TYPE_GROUP['note-added'])
@@ -361,6 +367,16 @@ describe("the stores' events", () => {
     expect(meetingEvent({ ...m, ended: null }, NOW, ids)).toBeNull()
   })
 
+  it('meetingEvent: dated when it ended; one older than 14 days is not logged', () => {
+    const DAY = 86_400_000
+    const m = { id: 'm-1', title: 'Standup', started: NOW - 3 * DAY - 30 * 60_000, ended: NOW - 3 * DAY, pausedMs: 0, state: 'done' as const, segments: [] }
+    // Recovered at launch three days later: it lands on its own day, not today.
+    expect(meetingEvent(m, NOW, ids)).toMatchObject({ at: NOW - 3 * DAY, title: 'Meeting recorded: Standup (30 min)' })
+    expect(meetingEvent({ ...m, started: NOW - 15 * DAY - 60_000, ended: NOW - 15 * DAY }, NOW, ids)).toBeNull()
+    // A clock that went back is never dated in the future.
+    expect(meetingEvent({ ...m, started: NOW, ended: NOW + 60_000 }, NOW, ids)!.at).toBe(NOW)
+  })
+
   it('meetingEvent: an empty recording is not logged', () => {
     const m = { id: 'm-1', title: '', started: NOW - 60_000, ended: NOW, pausedMs: 0, state: 'failed' as const, segments: [] }
     expect(meetingEvent(m, NOW, ids)).toBeNull()
@@ -402,6 +418,18 @@ describe("the stores' events", () => {
     expect(inboxEvent(entry(start), NOW, start, ids)).not.toBeNull()
   })
 
+  it("inboxEvent: a meeting's item is marked, and a web tab gets no title", () => {
+    const entry = { item: { id: 'meeting:added:m-1:5', kind: 'meeting', priority: 35, sessionKey: null, ticket: null, title: "Meeting 'Secret merger'", body: '', actions: [], detail: { type: 'meeting' } }, state: 'resolved', firstSeen: 0, lastSeen: NOW, resolvedHow: 'opened, or the meeting changed' } as unknown as InboxEntry
+    const e = inboxEvent(entry, NOW, undefined, ids)!
+    expect(e).toMatchObject({ subject: 'meeting-item:meeting:added:m-1:5', title: "Meeting 'Secret merger'" })
+    const [r] = forRemote([e])
+    expect(r).toEqual({ id: e.id, at: NOW, type: 'needs-you-answered', title: 'A meeting item was answered', subject: e.subject })
+    expect(JSON.stringify(r)).not.toContain('Secret')
+    // Any other answered item passes as it is.
+    const other = inboxEvent({ ...entry, item: { ...entry.item, id: 'ask:a', kind: 'question' as const, sessionKey: 'a' } }, NOW, undefined, ids)!
+    expect(forRemote([other])[0]).toBe(other)
+  })
+
   it('releaseEvents: once per version, also after a restart', () => {
     const seen = new Set<string>()
     const st = { current: '0.9.0', updatedFrom: { from: '0.8.2', at: NOW - 5000 } }
@@ -415,6 +443,17 @@ describe("the stores' events", () => {
     const again = new Set(['release:updated:0.9.0', 'release:offer:0.9.1'])
     expect(releaseEvents({ ...st, offer }, again, NOW, ids)).toEqual([])
     expect(releaseEvents({ current: '0.9.1', offer: { version: '0.9.1' } as never }, new Set(), NOW, ids)).toEqual([])
+  })
+})
+
+describe('activityAnswer', () => {
+  const meeting: ActivityEvent = { id: 'a', at: NOW, type: 'meeting', title: 'Meeting recorded: Secret (5 min)', subject: 'meeting:m', target: { meeting: 'm' } }
+  const list = () => [meeting]
+  it('checks the range, and gives a web tab the events as forRemote does', () => {
+    expect(activityAnswer(list, NOW - 1000, NOW, false)).toEqual([meeting])
+    expect(activityAnswer(list, NOW - 1000, NOW, true)[0].title).toBe('A meeting was recorded (5 min)')
+    for (const [s, u] of [['0', NOW], [0, null], [NaN, NOW], [NOW, 0], [0, 32 * 86_400_000], [0, Infinity]] as [unknown, unknown][])
+      expect(activityAnswer(list, s, u, false)).toEqual([])
   })
 })
 

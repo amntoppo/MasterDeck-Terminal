@@ -152,7 +152,8 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function inboxRow(e: InboxEntry): AttentionItem {
   const it = e.item
   const p = it.priority
-  const tier: Tier = p >= 80 ? 'now' : p >= 30 ? 'soon' : 'info'
+  // A failing PR is Now whether the inbox or the team's PRs report it (the derived CI row is Now).
+  const tier: Tier = p >= 80 || it.kind === 'ci' ? 'now' : p >= 30 ? 'soon' : 'info'
   const own = it.actions.filter((a) => a.type !== 'dismiss' && a.type !== 'open')
   const main = own.find((a) => a.primary) ?? own[0]
   const actions: AttentionAction[] = []
@@ -187,22 +188,17 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
   const inboxRows = open.map(inboxRow)
   const derived: AttentionItem[] = []
 
-  // What the inbox already says about a PR: an offer covers the whole PR; a ci / review item for a
-  // session covers that reason on the session's PRs.
+  // What the inbox already says about a PR: a ci / review offer covers its own PR only, and only
+  // its reason (a CI offer leaves "Changes requested" on the same PR, and the session's other PRs).
   const covered = new Map<string, Set<PrReason>>()
   const cover = (url: string, rs: PrReason[]) => {
     const s = covered.get(url) ?? new Set<PrReason>()
     rs.forEach((r) => s.add(r))
     covered.set(url, s)
   }
-  const byKey = new Map(input.sessions.map((s) => [s.key, s]))
   for (const e of open) {
-    const it = e.item
-    if (it.detail.type === 'offer') cover(it.detail.offer.pr.url, ['ci', 'changes', 'threads', 'ready'])
-    if (!it.sessionKey || (it.kind !== 'ci' && it.kind !== 'review')) continue
-    const s = byKey.get(it.sessionKey)
-    const urls = [...(s ? (input.sessionPrs[s.sessionId] ?? []) : []), ...(input.sessionPrs[it.sessionKey] ?? [])]
-    for (const u of urls) cover(u, it.kind === 'ci' ? ['ci'] : ['changes', 'threads'])
+    const d = e.item.detail
+    if (d.type === 'offer') cover(d.offer.pr.url, d.offer.kind === 'ci' ? ['ci'] : ['changes', 'threads'])
   }
 
   const mine = mineSet(input.me, input.logins)
@@ -245,15 +241,23 @@ export function attentionItems(input: AttentionInput, now: number): AttentionLis
     })
   }
 
-  // Review requests: master's sweep (prs) and the team's PRs, once per PR.
+  // Review requests: master's sweep (prs) and the team's PRs, once per PR. One fingerprint whatever
+  // the source (when it was last updated), so a dismissal holds while either source reports it; a
+  // PR the team's read knows as draft or no longer open is left out, also when master lists it.
   const asked = new Map<string, { label: string; title: string; author: string | null; at: number; fp: string }>()
+  const team = new Map(input.teamPrs.map((p) => [p.url, p]))
+  const reviewFp = (updatedAt: string | null | undefined) => {
+    const t = updatedAt ? Date.parse(updatedAt) : NaN
+    return Number.isFinite(t) ? String(t) : ''
+  }
   for (const p of input.prs) {
-    if (!p.reviewRequested) continue
-    asked.set(p.url, { label: prLabel(p.url, p.repoFull ?? p.repo, p.number), title: p.title, author: null, at: parseAt(p.updatedAt, now), fp: `${p.updatedAt ?? ''}` })
+    const t = team.get(p.url)
+    if (!p.reviewRequested || (t && (t.state !== 'open' || t.draft))) continue
+    asked.set(p.url, { label: prLabel(p.url, p.repoFull ?? p.repo, p.number), title: p.title, author: null, at: parseAt(p.updatedAt, now), fp: reviewFp(p.updatedAt) })
   }
   for (const p of input.teamPrs) {
-    if (p.state !== 'open' || mine.has(lower(p.author)) || !p.requested.some((r) => mine.has(lower(r)))) continue
-    asked.set(p.url, { label: prLabel(p.url, p.repo, p.number), title: p.title, author: p.author, at: parseAt(p.updatedAt, now), fp: fingerprintOf({ pr: p }) })
+    if (p.state !== 'open' || p.draft || mine.has(lower(p.author)) || !p.requested.some((r) => mine.has(lower(r)))) continue
+    asked.set(p.url, { label: prLabel(p.url, p.repo, p.number), title: p.title, author: p.author, at: parseAt(p.updatedAt, now), fp: reviewFp(p.updatedAt) })
   }
   for (const [url, r] of asked)
     derived.push({
@@ -564,7 +568,7 @@ export function deliveryView(input: DeliveryInput, now: number): DeliveryView {
       kpis: [
         { id: 'mine', label: 'Mine open', value: open.length, tab: 'mine' },
         { id: 'review', label: 'Waiting on you', value: asked.size, tab: 'review' },
-        { id: 'merged', label: 'Merged this week', value: merged, tab: 'merged' },
+        { id: 'merged', label: 'Merged in 7 days', value: merged, tab: 'merged' },
         { id: 'ready', label: 'Ready to merge', value: ready, tab: 'mine' },
       ],
       stages: [

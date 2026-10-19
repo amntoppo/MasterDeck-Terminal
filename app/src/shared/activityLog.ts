@@ -246,16 +246,21 @@ export interface ActivityFilter {
   repo?: string | null
 }
 
-/** The Timeline's filter: each condition set narrows the list (AND); none set keeps everything. */
+/**
+ * The Timeline's filter: each condition set narrows the list (AND); none set keeps everything.
+ * Accounts and repositories compare ignoring case, as GitHub does.
+ */
 export function filterActivity(events: ActivityEvent[], f: ActivityFilter): ActivityEvent[] {
   const groups = f.groups?.length ? new Set(f.groups) : null
+  const account = f.account?.toLowerCase()
+  const repo = f.repo?.toLowerCase()
   return events.filter((e) => {
     if (groups) {
       const g = TYPE_GROUP[e.type]
       if (!g || !groups.has(g)) return false
     }
-    if (f.account && e.account !== f.account) return false
-    if (f.repo && e.repo !== f.repo) return false
+    if (account && e.account?.toLowerCase() !== account) return false
+    if (repo && e.repo?.toLowerCase() !== repo) return false
     return true
   })
 }
@@ -372,16 +377,22 @@ export function runEvent(r: SchedRun, now: number, ids: () => string = newId(now
   return e
 }
 
-/** A meeting whose recording ended: "Meeting recorded: Standup (42 min)", or with no title yet "A meeting was recorded (42 min)". */
+/**
+ * A meeting whose recording ended: "Meeting recorded: Standup (42 min)", or with no title yet "A
+ * meeting was recorded (42 min)". It is dated when the recording ended, not when this is called:
+ * a recording recovered at launch lands on its own day, and one older than the log keeps (14
+ * days) is not logged.
+ */
 export function meetingEvent(m: Pick<Meeting, 'id' | 'title' | 'started' | 'ended' | 'pausedMs' | 'state' | 'segments'>, now: number, ids: () => string = newId(now)): ActivityEvent | null {
-  if (m.ended === null) return null
+  if (m.ended === null || !Number.isFinite(m.ended)) return null
+  if (now - m.ended > ACTIVITY_KEEP_DAYS * 86_400_000) return null
   // An empty recording ("Nothing was recorded.") ends failed with no text: nothing was recorded.
   if (m.state === 'failed' && !m.segments.length) return null
   const min = Math.max(1, Math.round((m.ended - m.started - (m.pausedMs || 0)) / 60_000))
   const title = m.title.trim()
   return {
     id: ids(),
-    at: now,
+    at: Math.min(m.ended, now),
     type: 'meeting',
     title: title ? `Meeting recorded: ${title} (${min} min)` : `A meeting was recorded (${min} min)`,
     subject: `meeting:${m.id}`,
@@ -409,17 +420,19 @@ export function noteEvent(c: NoteChange, now: number, ids: () => string = newId(
   return e
 }
 
-/** A Needs-you item that closed: its title, and how (an answer, or what changed). Not a dismissed one. */
 /**
+ * A Needs-you item that closed: its title, and how (an answer, or what changed). Not a dismissed one.
  * `since` is when this process started: an item last seen before it was left by the last run and
- * resolves at launch because it is gone, which is no answer.
+ * resolves at launch because it is gone, which is no answer. A meeting's item carries the meeting's
+ * title: its subject says so (`meeting-item:`), so `forRemote` can leave the title out.
  */
 export function inboxEvent(entry: InboxEntry, now: number, since?: number, ids: () => string = newId(now)): ActivityEvent | null {
   const how = entry.resolvedHow ?? null
   if (entry.state !== 'resolved' || how === 'dismissed') return null
   if (since !== undefined && entry.lastSeen < since) return null
   const item = entry.item
-  const e: ActivityEvent = { id: ids(), at: now, type: 'needs-you-answered', title: item.title || 'A Needs-you item closed', subject: `inbox:${item.id}` }
+  const subject = item.kind === 'meeting' ? `${MEETING_ITEM}${item.id}` : `inbox:${item.id}`
+  const e: ActivityEvent = { id: ids(), at: now, type: 'needs-you-answered', title: item.title || 'A Needs-you item closed', subject }
   if (how) e.detail = how
   const repo = item.ticket ? fullRepo(item.ticket.repo) : ''
   if (repo) e.repo = repo
@@ -454,11 +467,30 @@ export function releaseEvents(s: Pick<UpdateState, 'current' | 'offer' | 'update
 }
 
 /**
+ * `activity:list`'s answer: two finite times, since ≤ until, at most 31 days apart (else nothing),
+ * and for a web tab the events as `forRemote` gives them.
+ */
+export function activityAnswer(list: (since: number, until: number) => ActivityEvent[], since: unknown, until: unknown, remote: boolean): ActivityEvent[] {
+  if (typeof since !== 'number' || typeof until !== 'number' || !Number.isFinite(since) || !Number.isFinite(until)) return []
+  if (since > until || until - since > ACTIVITY_RANGE_MAX_MS) return []
+  const events = list(since, until)
+  return remote ? forRemote(events) : events
+}
+
+/** The subject prefix of a meeting's Needs-you item that closed (its title is the meeting's). */
+const MEETING_ITEM = 'meeting-item:'
+
+/**
  * The events as a web tab gets them. Meetings are the Mac's only (every meetings channel is blocked
- * for the web), so a meeting's line loses its title and its target.
+ * for the web), so a meeting's line, and a meeting's Needs-you item that closed, lose their title
+ * and target.
  */
 export function forRemote(events: ActivityEvent[]): ActivityEvent[] {
   return events.map((e) => {
+    if (e.type === 'needs-you-answered' && e.subject.startsWith(MEETING_ITEM)) {
+      const { target: _t, detail: _d, ...rest } = e
+      return { ...rest, title: 'A meeting item was answered' }
+    }
     if (e.type !== 'meeting') return e
     const min = / \((\d+) min\)$/.exec(e.title)?.[1]
     const { target: _t, ...rest } = e

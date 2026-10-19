@@ -125,13 +125,13 @@ interface AttentionList { items: AttentionItem[]; total: number; now: number; mo
 
 | Source | Tier | Rank | Title |
 |---|---|---|---|
-| `inbox.open` (never snoozed), priority ≥ 80 (input, menu, error, question, external, blocked) | now | priority | the item's title |
-| `inbox.open`, 30 ≤ priority < 80 (account, loop, loop-paused, ci, proposal, review, budget, meeting, context) | soon | priority | the item's title |
+| `inbox.open` (never snoozed), priority ≥ 80 (input, menu, error, question, external, blocked), and `ci` (a failing PR is Now whichever source reports it) | now | priority | the item's title |
+| `inbox.open`, 30 ≤ priority < 80 (account, loop, loop-paused, proposal, review, budget, meeting, context) | soon | priority | the item's title |
 | `inbox.open`, priority < 30 (waiting, idle, mods, notice, held) | info | priority | the item's title |
 | My open, non-draft PR (`teamPrs`), `ci === "failure"` | now | 70 | CI failed on your PR *repo#n* |
 | My PR, `reviewDecision === "CHANGES_REQUESTED"` | soon | 55 | Changes requested on *repo#n* |
 | My PR, `unresolvedThreads > 0` (and not the row above) | soon | 50 | *n* unresolved threads on *repo#n* |
-| A review requested from me: `prs[].reviewRequested`, or `teamPrs[].requested` holding one of my logins | soon | 45 | Your review is requested on *repo#n* |
+| A review requested from me: `prs[].reviewRequested`, or `teamPrs[].requested` holding one of my logins; not a PR `teamPrs` has as draft or not open | soon | 45 | Your review is requested on *repo#n* |
 | A schedule's last run `failed` in the last 24 h, with no later run of it | soon | 42 | Schedule "*name*" failed |
 | A `watches` entry with `error`, or a `prWatches` row with `error` | soon | 40 | Monitor / PR watch "*name*" cannot read its source |
 | My PR approved, `ci` success or null, no unresolved threads, not draft | ready | 20 | *repo#n* is ready to merge |
@@ -139,10 +139,9 @@ interface AttentionList { items: AttentionItem[]; total: number; now: number; mo
 
 - **"Mine"** means the author is `me`, or any login in `ghAccounts`.
 - **Dedupe** works by subject:
-  - An inbox item with a `sessionKey` covers that session's PRs (`sessionPrs[key]`) for the
-    matching kind: `ci` covers CI failed, and `review` covers changes requested and unresolved
-    threads.
-  - An inbox item whose detail is an `offer` covers its PR.
+  - An inbox `ci` / `review` item (an `offer`) covers its own PR (`offer.pr.url`) only, for the
+    matching reason: `ci` covers CI failed, and `review` covers changes requested and unresolved
+    threads. The session's other PRs, and the PR's other reasons, keep their rows.
   - A PR appears at most once. Its strongest reason wins (CI > changes > threads > ready), and
     the others go into `why`.
 - **Sort** is stable: tier (now, soon, ready, info), then `rank` descending, then `at` ascending
@@ -151,6 +150,8 @@ interface AttentionList { items: AttentionItem[]; total: number; now: number; mo
   - An inbox item is dismissed through `inboxAct(id, "dismiss")`, as the Needs-you card does.
   - A derived item is hidden on this device while its `fingerprint` matches the stored one:
     - a PR: `ci|reviewDecision|unresolvedThreads|updatedAt`
+    - a review request: its `updatedAt` (as a time), from `prs` or `teamPrs` alike, so a
+      dismissal holds while one source drops the PR for a moment
     - a run: its run id
     - a watch: `error|errorAt`
     - an update: its version
@@ -252,7 +253,8 @@ From main's stores, through one `activity.add(e)`:
   scheduler gains an `onRun(run)` hook beside `onChange`.
 - **meeting**: a meeting whose recording ended. The meetings store (`main/meetings/store.ts`) gains
   an `onEnded(meeting)` hook, called once when a stored meeting's `ended` is set; `meetingEvent`
-  skips an empty recording that failed.
+  skips an empty recording that failed. The event's time is the meeting's `ended` (a recording
+  recovered at launch is not news of today), and one that ended more than 14 days ago is not logged.
 - **note-added**: a new note. `NotesStore` passes `created: true` on the change of a note that
   did not exist.
   - The event is "A note was added", or "A note was added to #42" for a ticket note, with
@@ -263,7 +265,9 @@ From main's stores, through one `activity.add(e)`:
     version
   - "MasterDeck *x* is available", when an offer for a version not seen before appears
 - **needs-you-answered**: the inbox's `resolved` event, with `resolvedHow` ("Allowed from
-  desktop", "answered in the session"…).
+  desktop", "answered in the session"…). A meeting's item carries the meeting's title, so its
+  subject is `meeting-item:<id>` and a web tab gets "A meeting item was answered" with no target
+  or detail (`forRemote`).
 
 ### The store
 
@@ -306,7 +310,8 @@ From main's stores, through one `activity.add(e)`:
   Needs you.
 - **Selects**: account, and repo (from the events in range).
 - **Persistence**: the filters are kept per device in `md.dashboard.timeline`.
-- **Filtering** is pure: `filterActivity(events, {types, account, repo})`.
+- **Filtering** is pure: `filterActivity(events, {types, account, repo})`; account and repo
+  ignore case.
 - **Rows** are grouped by day under sticky day labels. Each row shows the time (`HH:mm`), a
   type tag (SES, PR, TKT, GIT, RUN, NOTE, YOU) and the title, with the detail below it.
   - A row opens its target.
@@ -339,7 +344,7 @@ From main's stores, through one `activity.add(e)`:
 - **KPIs**:
   - mine open
   - waiting on you (review requests)
-  - merged this week (my PRs with `mergedAt` in the last 7 days)
+  - merged in 7 days (my PRs with `mergedAt` in the last 7 days)
   - ready to merge
 - **By stage**: Draft · In review · Changes requested · Approved.
 - Each KPI opens Pull requests on its preset tab: Mine, Needs my review, Recently merged.
@@ -394,8 +399,14 @@ and the row is hidden.
     sessions: Record<string, SessionProc[]>  // by Session.key: running processes only
     strays: StrayProc[]
   }
-  interface StrayProc { pid: number; command: string; cwd: string | null; ports: Listen[]; startedAt: number; folderOf: string | null }
+  interface StrayProc { pid: number; command: string; cwd: string | null; ports: Listen[]; startedAt: number; folderOf: string | null; name?: string }
   ```
+
+  Main reads it once for every caller: callers during a read share it, and an answer under 15 s
+  old is given again (`SessionProcs.shared`). A web tab gets `procsAllForRemote(all)`: a stray's
+  `command` is its process name (lsof's `c` field, else the executable's base name), its `cwd`
+  null and `folderOf` the folder's base name. A machine-wide `lsof` that fails with nothing read
+  makes the answer an `error`, as `ps` does.
 
   `SessionProcs.listAll(sessions)` runs **one `ps` and one `lsof`** for every listed session with
   a pid (it reuses `parsePs`, `sessionGroups` and `parseLsof`). It does not touch the per-session

@@ -2175,9 +2175,12 @@ renderer already has, plus one new store, the activity log. Nothing new is polle
 **The view** (`renderer/src/components/DashboardView.tsx`): Needs attention full width, then a grid
 of the other five cards (`dashboard/{AttentionCard,NowCard,TimelineCard,DeliveryCard,UsageCard,HealthCard,Card,Sparkline}.tsx`).
 - Every card's figures come from a pure function of `shared/dashboard.ts`: `attentionItems`
-  (Needs-you items in tiers by priority: ≥ 80 `now`, 30–79 `soon`, < 30 `info`; derived PR, review
-  request, failed run, monitor / PR-watch error and update rows; dedupe against inbox `ci` /
-  `review` / `offer` items; one row per PR; sort tier, rank, oldest first, id; `max` 8, 5 compact),
+  (Needs-you items in tiers by priority: ≥ 80 `now`, 30–79 `soon`, < 30 `info`, and a `ci` item
+  `now` like the derived CI row; derived PR, review request, failed run, monitor / PR-watch error and
+  update rows; a `ci` / `review` offer hides only its own PR's matching reason (CI, or changes
+  requested and threads); one row per PR; a review request has one fingerprint (its `updatedAt`)
+  from either source, and a PR the team's read has as draft or closed is left out; sort tier, rank,
+  oldest first, id; `max` 8, 5 compact),
   `nowView`, `deliveryView`, `usageView`, `healthView`, `pruneDismissed`, `relTime`.
 - **Slices, not the state:** each card's input is a `useMemo` on the slices it reads, passed
   through `useStable` (`renderer/src/useStable.ts`: keeps the last reference while the value's JSON
@@ -2252,11 +2255,15 @@ store): `<home>/activity.jsonl`, one `ActivityEvent` per line (`id`, `at`, `type
 - **From the stores**, each a pure mapper wired through `logActivity`: `runEvent` (`Scheduler`'s
   new `onRun`, once per ended run: done, failed, skipped (subject `schedskip:<id>`, so skips
   coalesce), stopped), `meetingEvent` (`MeetingStore`'s `onEnded`, through `MeetingsIpc`'s
-  `onMeetingEnded`; an empty failed recording is skipped), `noteEvent` (`NotesStore` passes
+  `onMeetingEnded`; dated at the meeting's `ended`, so a recording recovered at launch lands on
+  its own day, and one older than 14 days is not logged; an empty failed recording is skipped), `noteEvent` (`NotesStore` passes
   `created: true` on a note's first write; meeting notes are left out), `releaseEvents` (from the
   update state: "Updated to x (from y)" and "MasterDeck x is available", once per version, the
   logged subjects read back once from the log), `inboxEvent` (the inbox's `resolved` event, not a
-  dismissal, and not an item last seen before `processStart`).
+  dismissal, and not an item last seen before `processStart`; a meeting's item has the subject
+  `meeting-item:<id>`, since its title is the meeting's).
+- **Backdated events** (a merge GitHub reports at its own time) are inserted in order: memory stays
+  newest first, so `list(since, until)` stops at the first event before `since` without missing one.
 - **Notes are private:** a note's event is "A note was added" or "… to #42", with `target: {note:
   id}` and a ticket's repo: never its title, preview or text (a test asserts it). A new event type
   must keep to that.
@@ -2270,15 +2277,19 @@ store): `<home>/activity.jsonl`, one `ActivityEvent` per line (`id`, `at`, `type
   file + rename). After 5000 appends since the last load or rewrite it is rewritten the same way.
 - **Errors:** a write or rewrite failure is logged once a minute with its code only (no path) and
   dropped; nothing throws into a caller.
-- **Channels:** `activity:list(since, until)` (`CH.activityList`, `remote`): two finite numbers,
-  `since ≤ until`, at most 31 days apart, else `[]`; newest first, at most 1000. A remote call gets
-  `forRemote(events)`: meetings are the Mac's only, so a meeting's line becomes "A meeting was
-  recorded (*n* min)" with no target. `activity:changed` (`CH.activityChanged`, `event`, no
+- **Channels:** `activity:list(since, until)` (`CH.activityList`, `remote`; `activityAnswer`): two
+  finite numbers, `since ≤ until`, at most 31 days apart, else `[]`; newest first, at most 1000. A
+  remote call gets `forRemote(events)`: meetings are the Mac's only, so a meeting's line becomes "A
+  meeting was recorded (*n* min)" with no target, and a meeting's Needs-you item that closed "A
+  meeting item was answered" with no target or detail. The Timeline's account and repository
+  filters (`filterActivity`) ignore case. `activity:changed` (`CH.activityChanged`, `event`, no
   payload), throttled to once per 2 s.
 
-**`procs:all`** (`CH.procsAll`, `remote`; `SessionProcs.listAll` in `main/sessionProcs.ts`): every
+**`procs:all`** (`CH.procsAll`, `remote`; `SessionProcs.shared` → `listAll` in `main/sessionProcs.ts`;
+callers during a read share it, and an answer under 15 s old (`PROCS_ALL_REUSE_MS`) is given again,
+to the window and web tabs alike): every
 listed session (`pid` null when `done`, its `cwd` and `sessionWorktrees`) in three spawns: one `ps`,
-one `lsof -iTCP -sTCP:LISTEN` for the machine's listeners, one `lsof -d cwd,1` for the folders and
+one `lsof +c 0 -iTCP -sTCP:LISTEN` for the machine's listeners (with their process names), one `lsof -d cwd,1` for the folders and
 stdouts of the sessions' processes and the listeners. Answers `ProcsAll` (`shared/sessionProcs.ts`:
 `at`, `sessions` by `Session.key`, running processes only, `strays`, `error?`). It only reads the
 groups `list()` saw (`seen`), so Details is unchanged by it.
@@ -2288,11 +2299,14 @@ groups `list()` saw (`seen`), so Details is unchanged by it.
   folded into the topmost one. `strayFolders` adds each folder's real path (lsof reports
   `/private/tmp`) and drops `/`, the home folder and its parents (ponytail: a session in `~` finds
   no strays, since nearly every listener sits below it). Only processes with ports are found.
-- `ps` failing answers empty lists with `error` ("ps failed (exit 1)"; an `lsof` that fails with
-  nothing read gives "lsof failed (exit n)" or "… timed out"; never output or paths). The cards then
+- `ps` failing answers empty lists with `error` ("ps failed (exit 1)"; either `lsof` that fails with
+  nothing read gives "lsof failed (exit n)" or "… timed out"; never output or paths; the
+  machine-wide one's exit 1 with nothing on stderr is "nothing listens", not a failure). The cards then
   say the read failed rather than "nothing running".
-- A remote call gets each stray's `command` cut to its executable's name (`commandName`): a stray
-  was started by anyone, not a session, so its argv stays on the Mac. Windows (or no sessions)
+- A remote call gets `procsAllForRemote(all)`: each stray's `command` is its process name (lsof's
+  `c` field, else the executable's base name, `commandName`), `cwd` null and `folderOf` the folder's
+  base name: a stray was started by anyone, not a session, so its argv and paths stay on the Mac.
+  Session processes pass as they are (`procs:list` sends them already). Windows (or no sessions)
   answers `{at, sessions: {}, strays: []}`.
 
 ### In-app updates (issue #122)
@@ -2395,7 +2409,7 @@ Pure TypeScript, no electron/node imports in the types, tested with vitest. The 
 | Needs you | `inbox.ts`, `notify.ts`, `nudge.ts`, `offers.ts`, `send.ts` |
 | GitHub, board | `board.ts`, `boardFilter.ts`, `repoView.ts`, `teamPrs.ts`, `prSummary.ts`, `accounts.ts`, `ticket.ts`, `ticketBuilder.ts`, `sprintSummary.ts`, `standup.ts`, `ghAuth.ts`, `detect.ts`, `git.ts`, `janitor.ts`, `cleanup.ts` |
 | Schedules | `sched.ts` (schedules, slots in a time zone, a tick's plan, how a run is going) |
-| Dashboard | `dashboard.ts` (each card's view: `attentionItems`, `nowView`, `deliveryView`, `usageView`, `healthView`), `dashboardLayout.ts` (Customise's order and hidden cards), `activityLog.ts` (`diffActivity`, the stores' mappers, `coalesce`, `filterActivity`, `forRemote`), `sessionProcs.ts` (`ProcsAll`, `findStrays`) |
+| Dashboard | `dashboard.ts` (each card's view: `attentionItems`, `nowView`, `deliveryView`, `usageView`, `healthView`), `dashboardLayout.ts` (Customise's order and hidden cards), `activityLog.ts` (`diffActivity`, the stores' mappers, `coalesce`, `filterActivity`, `forRemote`), `sessionProcs.ts` (`ProcsAll`, `findStrays`, `procsAllForRemote`) |
 | Workflows, hooks | `flow.ts`, `flowFrame.ts`, `flowBuilder.ts`, `flowTrack.ts`, `flowWatch.ts`, `workflow.ts`, `deckHooks.ts`, `skillInfo.ts`, `install.ts`, `models.ts` |
 | Remote | `remote.ts` (wire protocol copy), `remoteSnapshot.ts`, `remoteGuard.ts`, `remoteDeck.ts`, `remotePresence.ts`, `deviceInfo.ts`, `account.ts`, `bridgeWire.ts`, `e2e.ts`, `b64.ts`, `wordlist.ts` (BIP-39) |
 | Misc | `format.ts`, `fuzzy.ts` |

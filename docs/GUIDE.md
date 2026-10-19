@@ -123,7 +123,7 @@ relative ("5 min ago") and move on once a minute.
 - **Delivery:** the sprint picked on the Board: tickets per board column, with the board's own
   column names, and a burndown (tickets left against the ideal line). A board with no sprint field
   shows the counts only; an account with no GitHub board says so. Below, your PRs: open, waiting
-  on your review, merged this week and ready to merge (each opens Pull requests on that tab), and
+  on your review, merged in the last 7 days and ready to merge (each opens Pull requests on that tab), and
   by stage (Draft, In review, Changes requested, Approved).
 - **Usage and cost:** today and this week (Monday to today): cost and tokens; per account with two
   or more accounts (cost from before this version, or with no account, is **Unknown account**);

@@ -114,14 +114,13 @@ import { SessionGroupStore } from "./sessionGroups";
 import { NotesStore } from "./notes";
 import { ActivityLog } from "./activityLog";
 import {
-  ACTIVITY_RANGE_MAX_MS,
+  activityAnswer,
   diffActivity,
   inboxEvent,
   meetingEvent,
   noteEvent,
   releaseEvents,
   runEvent,
-  forRemote,
   type ActivityEvent,
 } from "@shared/activityLog";
 import { Scheduler } from "./sched";
@@ -257,7 +256,7 @@ import { PeerStore } from "./peers";
 import { MAX_PEERS } from "@shared/peers";
 import { PeerSync } from "./peerSync";
 import { SessionProcs } from "./sessionProcs";
-import { commandName, isPortUrl } from "@shared/sessionProcs";
+import { isPortUrl, procsAllForRemote } from "@shared/sessionProcs";
 import { isWebLink } from "@shared/termLinks";
 import {
   installStatusline,
@@ -2892,19 +2891,10 @@ function registerIpc(): void {
   });
   // Schedules (#140). The web asked with webConfirm before a delete; the window asks here.
   reg.handle(CH.schedList, () => scheduler.list());
-  // The Dashboard's Timeline (#183): two finite times, since ≤ until, at most 31 days apart; else [].
+  // The Dashboard's Timeline (#183): activityAnswer checks the range (at most 31 days).
   // A web tab gets meetings without their titles (forRemote): meetings are the Mac's only.
   reg.handle(CH.activityList, (e, since: unknown, until: unknown) =>
-    typeof since === "number" &&
-    typeof until === "number" &&
-    Number.isFinite(since) &&
-    Number.isFinite(until) &&
-    since <= until &&
-    until - since <= ACTIVITY_RANGE_MAX_MS
-      ? isRemote(e)
-        ? forRemote(activity.list(since, until))
-        : activity.list(since, until)
-      : [],
+    activityAnswer((s, u) => activity.list(s, u), since, until, isRemote(e)),
   );
   reg.handle(CH.schedSave, (_e, input: unknown) => scheduler.save(input));
   reg.handle(CH.schedEnable, (_e, id: unknown, on: unknown) =>
@@ -4059,8 +4049,9 @@ function registerIpc(): void {
       ? sessionProcs.output(key, pid as number)
       : { ok: false, message: "bad request" },
   );
+  // One read for every caller: concurrent asks share it, and an answer younger than 15 s is reused.
   reg.handle(CH.procsAll, async (e) => {
-    const all = await sessionProcs.listAll(
+    const all = await sessionProcs.shared(() =>
       (latest?.sessions ?? []).map((s) => ({
         key: s.key,
         pid: s.state === "done" ? null : s.pid,
@@ -4068,8 +4059,8 @@ function registerIpc(): void {
         worktrees: (latest?.sessionWorktrees[s.key] ?? []).map((w) => w.path),
       })),
     );
-    // A stray was started by anyone, not a session: a web tab gets its executable's name, not its argv.
-    return isRemote(e) ? { ...all, strays: all.strays.map((s) => ({ ...s, command: commandName(s.command) })) } : all;
+    // A stray was started by anyone, not a session: a web tab gets its name and folder's name only.
+    return isRemote(e) ? procsAllForRemote(all) : all;
   });
   reg.on(CH.openPort, (e, url: unknown) => {
     if (!isRemote(e) && isPortUrl(url)) void shell.openExternal(url);

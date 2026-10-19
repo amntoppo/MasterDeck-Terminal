@@ -51,6 +51,21 @@ describe('ActivityLog', () => {
     expect(log.list(NOW, 0)).toEqual([])
   })
 
+  it('a backdated event added after newer ones is kept in order and listed', () => {
+    const log = new ActivityLog(file, { now: () => NOW })
+    log.add(ev({ at: NOW - 60_000 }))
+    log.add(ev({ at: NOW }))
+    // A merge GitHub reports 40 minutes back, read now, after the newer rows.
+    const late = ev({ at: NOW - 40 * 60_000, type: 'pr-merged', subject: 'pr:x' })
+    log.add(late)
+    log.add(ev({ at: NOW - 30_000 }))
+    expect(log.list(0, NOW).map((e) => e.at)).toEqual([NOW, NOW - 30_000, NOW - 60_000, NOW - 40 * 60_000])
+    expect(log.list(NOW - 45 * 60_000, NOW).map((e) => e.id)).toContain(late.id)
+    expect(log.list(NOW - 45 * 60_000, NOW - 35 * 60_000).map((e) => e.id)).toEqual([late.id])
+    // And after a reload.
+    expect(new ActivityLog(file, { now: () => NOW }).list(NOW - 45 * 60_000, NOW).map((e) => e.id)).toContain(late.id)
+  })
+
   it('subjects: one type\'s subjects, from memory, also after a reload', () => {
     const log = new ActivityLog(file, { now: () => NOW })
     log.add(ev({ type: 'release', subject: 'release:updated:0.9.0' }))

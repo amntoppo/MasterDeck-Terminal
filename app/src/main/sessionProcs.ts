@@ -55,6 +55,8 @@ const PS = existsSync('/bin/ps') ? '/bin/ps' : 'ps'
 const LSOF = existsSync('/usr/sbin/lsof') ? '/usr/sbin/lsof' : 'lsof'
 /** A session no one asked about for this long is forgotten. */
 const FORGET_MS = 60 * 60 * 1000
+/** How long `shared` reuses the last `procs:all` answer, for every caller (window and web tabs). */
+export const PROCS_ALL_REUSE_MS = 15_000
 
 /** "ps failed (exit 1)", "lsof timed out": no output, so no paths reach the screen or the web. */
 const failed = (what: string, code: number): string => (code === -2 ? `${what} timed out` : `${what} failed (exit ${code})`)
@@ -93,6 +95,8 @@ export function strayFolders(folders: (string | null)[], home: string): string[]
  */
 export class SessionProcs {
   private seen = new Map<string, Seen>()
+  private allRead: Promise<ProcsAll> | null = null
+  private allLast: ProcsAll | null = null
 
   constructor(
     private run: Runner,
@@ -169,23 +173,48 @@ export class SessionProcs {
    * ponytail: no transcript is read, so a shell is `background` when its stdout is a task output
    * file (recent Claude Code versions write a foreground call's there too); Details has the exact kind.
    */
+  /**
+   * `listAll` for `procs:all`: callers asking while a read runs share it, and an answer younger than
+   * 15 s is given again, so a window and several web tabs polling the Dashboard cost one read.
+   * `sessions` is asked for only when a read starts.
+   */
+  shared(sessions: () => ProcsAllSession[]): Promise<ProcsAll> {
+    if (this.allRead) return this.allRead
+    const last = this.allLast
+    if (last && this.now() - last.at < PROCS_ALL_REUSE_MS && this.now() >= last.at) return Promise.resolve(last)
+    const read = this.listAll(sessions())
+      .then((a) => {
+        this.allLast = a
+        return a
+      })
+      .finally(() => {
+        this.allRead = null
+      })
+    this.allRead = read
+    return read
+  }
+
   async listAll(sessions: ProcsAllSession[]): Promise<ProcsAll> {
     const at = this.now()
     if (this.platform === 'win32' || !sessions.length) return { at, sessions: {}, strays: [] }
     const [ps, socks] = await Promise.all([
       this.run(PS, PS_ARGS, { timeoutMs: 5000 }),
-      this.run(LSOF, ['-nP', '-w', '-iTCP', '-sTCP:LISTEN', '-Fpcfn'], { timeoutMs: 5000 }),
+      // `+c 0`: the whole process name (the `c` field), which is all a web tab gets of a stray.
+      this.run(LSOF, ['-nP', '-w', '+c', '0', '-iTCP', '-sTCP:LISTEN', '-Fpcfn'], { timeoutMs: 5000 }),
     ])
     // Without the table nothing can be said: not "nothing running".
     if (ps.code !== 0) return { at, sessions: {}, strays: [], error: failed('ps', ps.code) }
     const rows = parsePs(ps.stdout)
     const listens = parseLsof(socks.stdout)
+    // lsof exits 1 with nothing on stderr when nothing listens on the machine: that is an answer.
+    // Anything else with no output (a timeout, a refusal) leaves the ports unknown, not none.
+    const nothingListens = socks.code === 1 && !socks.stderr.trim()
     const live = sessions.filter((s) => s.pid !== null)
     const groups = new Map(live.map((s) => [s.key, sessionGroups(rows, s.pid!, new Set(this.seen.get(s.key)?.groups), at)]))
     const claimed = new Set([...groups.values()].flatMap((gs) => gs.flatMap((g) => g.pids)))
     const pids = new Set(claimed)
     for (const [pid, i] of listens) if (i.listens.length) pids.add(pid)
-    let error: string | undefined
+    let error = socks.code !== 0 && !listens.size && !nothingListens ? failed('lsof', socks.code) : undefined
     let files = new Map<number, LsofInfo>()
     if (pids.size) {
       // lsof exits 1 when one of the pids has nothing to list; its output still counts.
@@ -195,8 +224,10 @@ export class SessionProcs {
     }
     for (const [pid, i] of listens) {
       const had = files.get(pid)
-      if (had) had.listens.push(...i.listens)
-      else files.set(pid, i)
+      if (had) {
+        had.listens.push(...i.listens)
+        had.name ??= i.name
+      } else files.set(pid, i)
     }
     const out: Record<string, SessionProc[]> = {}
     for (const s of sessions)

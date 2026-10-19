@@ -15,6 +15,7 @@ import {
   parsePs,
   portLabel,
   portUrl,
+  procsAllForRemote,
   sessionGroups,
   shellCommand,
   taskIdOf,
@@ -190,6 +191,36 @@ describe('findStrays', () => {
     expect(commandName('/usr/bin/python3 -m http.server 8000')).toBe('python3')
     expect(commandName('vite')).toBe('vite')
     expect(commandName('')).toBe('')
+    // An app bundle's executable with spaces in its name is not cut at the first space.
+    expect(commandName('/Applications/My App.app/Contents/MacOS/My App --x')).toBe('My App')
+    expect(commandName('/Applications/My App.app/Contents/MacOS/My App')).toBe('My App')
+  })
+  it('reads the process name (c field) from lsof', () => {
+    const m = parseLsof(['p70', 'cMy App', 'f3', 'n*:8000', 'p71', 'c', 'f4', 'n*:8001'].join('\n'))
+    expect(m.get(70)).toEqual({ name: 'My App', listens: [{ host: '*', port: 8000 }] })
+    expect(m.get(71)!.name).toBeUndefined()
+  })
+  it('procsAllForRemote: a stray loses its path, arguments and cwd; session processes pass as they are', () => {
+    const procs = { k: [{ pid: 1, command: 'npm run dev', cwd: '/work/api' }] } as never
+    const all = {
+      at: 5,
+      sessions: procs,
+      strays: [
+        { pid: 70, command: '/Applications/My App.app/Contents/MacOS/My App --token=secret', cwd: '/work/api/docs', ports: [{ host: '*', port: 8000 }], startedAt: 1, folderOf: '/work/api', name: 'My App' },
+        { pid: 71, command: '/usr/bin/python3 -m http.server --dir /secret', cwd: '/work/web', ports: [], startedAt: 2, folderOf: '/work/web/' },
+        { pid: 72, command: 'vite', cwd: null, ports: [], startedAt: 3, folderOf: null },
+      ],
+    }
+    const r = procsAllForRemote(all)
+    expect(r.sessions).toBe(procs)
+    expect(r.strays.map((s) => [s.command, s.cwd, s.folderOf])).toEqual([
+      ['My App', null, 'api'],
+      ['python3', null, 'web'],
+      ['vite', null, null],
+    ])
+    expect(JSON.stringify(r.strays)).not.toMatch(/secret|\/work/)
+    // The window's answer is left alone.
+    expect(all.strays[0].cwd).toBe('/work/api/docs')
   })
   it('finds nothing without folders', () => {
     expect(findStrays(rows, info, [], [100], 0)).toEqual([])

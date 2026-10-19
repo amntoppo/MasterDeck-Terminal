@@ -7,6 +7,7 @@ import {
   nowView,
   pruneDismissed,
   relTime,
+  weekStart,
   usageView,
   type AttentionInput,
   type DeliveryInput,
@@ -156,32 +157,38 @@ describe('attentionItems', () => {
     expect(l.items[0].actions[1]).toEqual({ type: 'open', label: 'Open session', target: { session: 'k1' } })
   })
 
-  it('lets an inbox ci item for a session hide that session\'s PR CI failure', () => {
-    const s = sess('k1', 'idle')
-    const inbox = { open: [entry('ci1', 'ci', 70, { sessionKey: 'k1' })], snoozed: [], history: [] }
-    const l = attentionItems(attn({ inbox, sessions: [s], sessionPrs: { 'sid-k1': ['https://github.com/acme/web/pull/7'] }, teamPrs: [tpr(7, { ci: 'failure' })] }), NOW)
-    expect(l.items.map((i) => i.id)).toEqual(['ci1'])
+  const offerEntry = (id: string, kind: 'ci' | 'review', n: number, sessionKey: string | null = null) => {
+    const p = lpr(n, { url: `https://github.com/acme/web/pull/${n}` })
+    return entry(id, kind, kind === 'ci' ? 70 : 50, { sessionKey, detail: { type: 'offer', offer: { id, pr: p, kind, owner: null, proposal: null, message: '' } } })
+  }
+
+  it('puts an inbox ci item in Now, as the derived CI row', () => {
+    const inbox = { open: [offerEntry('offer:x', 'ci', 7)], snoozed: [], history: [] }
+    const [i] = attentionItems(attn({ inbox }), NOW).items
+    expect(i).toMatchObject({ id: 'offer:x', tier: 'now', rank: 70 })
   })
 
-  it('lets an inbox ci item hide only CI: changes requested still shows', () => {
+  it('lets a ci offer hide its own PR\'s CI failure only, not the session\'s other PRs', () => {
     const s = sess('k1', 'idle')
-    const inbox = { open: [entry('ci1', 'ci', 70, { sessionKey: 'k1' })], snoozed: [], history: [] }
-    const l = attentionItems(attn({ inbox, sessions: [s], sessionPrs: { 'sid-k1': ['https://github.com/acme/web/pull/7'] }, teamPrs: [tpr(7, { ci: 'failure', reviewDecision: 'CHANGES_REQUESTED' })] }), NOW)
-    expect(l.items.map((i) => i.title)).toEqual(['Item ci1', 'Changes requested on acme/web#7'])
+    const inbox = { open: [offerEntry('offer:x', 'ci', 7, 'k1')], snoozed: [], history: [] }
+    const urls = ['https://github.com/acme/web/pull/7', 'https://github.com/acme/web/pull/8']
+    const l = attentionItems(attn({ inbox, sessions: [s], sessionPrs: { 'sid-k1': urls }, teamPrs: [tpr(7, { ci: 'failure' }), tpr(8, { ci: 'failure' })] }), NOW)
+    expect(l.items.map((i) => i.id).sort()).toEqual(['offer:x', 'pr:https://github.com/acme/web/pull/8:ci'])
   })
 
-  it('lets an inbox review item hide changes requested and threads', () => {
-    const s = sess('k1', 'idle')
-    const inbox = { open: [entry('r1', 'review', 50, { sessionKey: 'k1' })], snoozed: [], history: [] }
-    const l = attentionItems(attn({ inbox, sessions: [s], sessionPrs: { 'sid-k1': ['https://github.com/acme/web/pull/7'] }, teamPrs: [tpr(7, { reviewDecision: 'CHANGES_REQUESTED', unresolvedThreads: 2 })] }), NOW)
-    expect(l.items.map((i) => i.id)).toEqual(['r1'])
+  it('lets a ci offer hide only CI: changes requested still shows', () => {
+    const inbox = { open: [offerEntry('offer:x', 'ci', 7)], snoozed: [], history: [] }
+    const l = attentionItems(attn({ inbox, teamPrs: [tpr(7, { ci: 'failure', reviewDecision: 'CHANGES_REQUESTED' })] }), NOW)
+    expect(l.items.map((i) => i.title)).toEqual(['Item offer:x', 'Changes requested on acme/web#7'])
   })
 
-  it('lets an offer item hide its PR', () => {
-    const p = lpr(1, { url: 'https://github.com/acme/web/pull/7' })
-    const inbox = { open: [entry('offer:x', 'ci', 70, { detail: { type: 'offer', offer: { id: 'x', pr: p, kind: 'ci', owner: null, proposal: null, message: '' } } })], snoozed: [], history: [] }
-    const l = attentionItems(attn({ inbox, teamPrs: [tpr(7, { ci: 'failure', unresolvedThreads: 1 })] }), NOW)
-    expect(l.items.map((i) => i.id)).toEqual(['offer:x'])
+  it('lets a review offer hide changes requested and threads, not CI', () => {
+    const inbox = { open: [offerEntry('offer:r', 'review', 7)], snoozed: [], history: [] }
+    const l = attentionItems(attn({ inbox, teamPrs: [tpr(7, { reviewDecision: 'CHANGES_REQUESTED', unresolvedThreads: 2 }), tpr(9, { ci: 'failure', reviewDecision: 'CHANGES_REQUESTED' })] }), NOW)
+    expect(l.items.map((i) => i.id)).toEqual(['pr:https://github.com/acme/web/pull/9:ci', 'offer:r'])
+    const both = attentionItems(attn({ inbox, teamPrs: [tpr(7, { ci: 'failure', unresolvedThreads: 2 })] }), NOW)
+    expect(both.items.map((i) => i.id)).toEqual(['pr:https://github.com/acme/web/pull/7:ci', 'offer:r'])
+    expect(both.items[0].why).toBe('PR 7')
   })
 
   it('finds review requests from prs and from teamPrs, once per PR', () => {
@@ -196,6 +203,31 @@ describe('attentionItems', () => {
     ])
     expect(l.items[1].why).toBe('PR 5 · by bob')
     expect(l.items[1].actions).toEqual([{ type: 'review', label: 'Review', primary: true }])
+  })
+
+  it('keeps a review request dismissed when the team\'s read drops the PR for a moment', () => {
+    const url = 'https://github.com/acme/api/pull/1'
+    const at = new Date(NOW - 2 * HOUR).toISOString()
+    const fromMaster = lpr(1, { reviewRequested: true, updatedAt: at })
+    const fromTeam = { ...tpr(1, { author: 'bob', requested: ['me'], updatedAt: at, ci: 'failure' }), url }
+    const both = attentionItems(attn({ prs: [fromMaster], teamPrs: [fromTeam] }), NOW)
+    const fp = both.items[0].fingerprint
+    const dismissed = [{ id: `pr:${url}:review`, fingerprint: fp }]
+    expect(attentionItems(attn({ prs: [fromMaster], teamPrs: [fromTeam], dismissed }), NOW).total).toBe(0)
+    expect(attentionItems(attn({ prs: [fromMaster], teamPrs: [], dismissed }), NOW).total).toBe(0)
+    expect(attentionItems(attn({ prs: [], teamPrs: [fromTeam], dismissed }), NOW).total).toBe(0)
+    // Updated since: news again.
+    expect(attentionItems(attn({ prs: [{ ...fromMaster, updatedAt: new Date(NOW).toISOString() }], dismissed }), NOW).total).toBe(1)
+  })
+
+  it('leaves out a review request on a draft or closed PR, whichever source lists it', () => {
+    const url = 'https://github.com/acme/api/pull/1'
+    const fromMaster = lpr(1, { reviewRequested: true })
+    for (const t of [{ draft: true }, { state: 'closed' as const }]) {
+      const team = { ...tpr(1, { author: 'bob', requested: ['me'], ...t }), url }
+      expect(attentionItems(attn({ prs: [fromMaster], teamPrs: [team] }), NOW).total).toBe(0)
+      expect(attentionItems(attn({ teamPrs: [team] }), NOW).total).toBe(0)
+    }
   })
 
   it('finds a schedule whose last run failed in the last day', () => {
@@ -451,7 +483,7 @@ describe('deliveryView', () => {
     expect(v.prs.kpis).toEqual([
       { id: 'mine', label: 'Mine open', value: 5, tab: 'mine' },
       { id: 'review', label: 'Waiting on you', value: 2, tab: 'review' },
-      { id: 'merged', label: 'Merged this week', value: 1, tab: 'merged' },
+      { id: 'merged', label: 'Merged in 7 days', value: 1, tab: 'merged' },
       { id: 'ready', label: 'Ready to merge', value: 1, tab: 'mine' },
     ])
     expect(v.prs.stages).toEqual([
@@ -647,6 +679,17 @@ describe('healthView', () => {
     expect(row(healthIn({ update: upd({ enabled: false }) }), 'masterdeck')).toMatchObject({ status: 'ok', detail: '0.9.0' })
     expect(row(healthIn({ update: upd({ phase: 'checking' }) }), 'masterdeck')).toMatchObject({ status: 'ok', detail: '0.9.0, checking for updates…' })
     expect(row(healthIn({ update: upd({ phase: 'installing', offer }) }), 'masterdeck')).toMatchObject({ status: 'warn', detail: 'Installing 0.9.1…' })
+  })
+})
+
+describe('weekStart', () => {
+  const at = (d: number, h = 0, m = 0) => new Date(2026, 9, d, h, m).getTime()
+  it('is Monday 00:00 on a Monday, a mid-week day and a Sunday', () => {
+    expect(weekStart(at(12))).toBe(at(12)) // Monday at midnight
+    expect(weekStart(at(12, 9, 30))).toBe(at(12)) // Monday morning
+    expect(weekStart(at(14, 15))).toBe(at(12)) // Wednesday
+    expect(weekStart(NOW)).toBe(at(12)) // Sunday 18th
+    expect(weekStart(at(19, 8))).toBe(at(19)) // the next Monday
   })
 })
 
